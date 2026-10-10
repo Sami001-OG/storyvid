@@ -44,11 +44,12 @@ LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
 LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
 IMAGE_PROVIDER = os.getenv("SV_IMAGE_PROVIDER", "gemini")
 IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
+IMAGE_URL = os.getenv("SV_IMAGE_URL", "https://api.openai.com/v1")
 OUT = Path(os.getenv("SV_OUT", "out"))
 CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
 
 def load_env():
-    global LLM_MODEL, LLM_URL, IMAGE_PROVIDER, IMAGE_MODEL, OUT, CACHE
+    global LLM_MODEL, LLM_URL, IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_URL, OUT, CACHE
     env_file = Path(__file__).resolve().parent / ".env"
     if env_file.is_file():
         for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -63,6 +64,7 @@ def load_env():
     LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
     IMAGE_PROVIDER = os.getenv("SV_IMAGE_PROVIDER", "gemini")
     IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
+    IMAGE_URL = os.getenv("SV_IMAGE_URL", "https://api.openai.com/v1")
     OUT = Path(os.getenv("SV_OUT", "out"))
     CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
 
@@ -217,7 +219,7 @@ class Opts:
         self.ref_audio = (self.ref_audio or "").strip() or None
         self.hd, self.kenburns, self.burn_subs = bool(self.hd), bool(self.kenburns), bool(self.burn_subs)
         self.image_provider = (self.image_provider or IMAGE_PROVIDER).lower().strip()
-        if self.image_provider not in ("gemini", "pollinations", "openai"):
+        if self.image_provider not in ("gemini", "pollinations", "openai", "custom"):
             self.image_provider = "gemini"
         self.llm_url = (self.llm_url or "").strip() or None
         self.llm_model = (self.llm_model or "").strip() or None
@@ -572,9 +574,27 @@ def make_image_openai(client, prompt: str, aspect: str, wd: Path, idx: int, size
 
     def call():
         import base64
-        r = client.images.generate(model=model, prompt=prompt[:1000], size=sz, response_format="b64_json")
-        b64 = r.data[0].b64_json
-        return base64.b64decode(b64), ".png"
+        r = None
+        try:
+            r = client.images.generate(model=model, prompt=prompt[:1000], size=sz, response_format="b64_json")
+        except Exception:
+            try:
+                r = client.images.generate(model=model, prompt=prompt[:1000], response_format="b64_json")
+            except Exception:
+                r = client.images.generate(model=model, prompt=prompt[:1000])
+
+        if r and getattr(r, "data", None) and len(r.data) > 0:
+            item = r.data[0]
+            if getattr(item, "b64_json", None):
+                return base64.b64decode(item.b64_json), ".png"
+            if getattr(item, "url", None):
+                req = urllib.request.Request(item.url, headers={"User-Agent": "Mozilla/5.0 storyvid"})
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = resp.read()
+                    ctype = resp.headers.get_content_type()
+                    ext = ".jpg" if "jpeg" in ctype else ".png"
+                    return data, ext
+        raise RuntimeError("no image data in API response")
 
     try:
         data, ext = retry(call, f"image {idx + 1}", rep, tries=3)
@@ -582,7 +602,7 @@ def make_image_openai(client, prompt: str, aspect: str, wd: Path, idx: int, size
         path.write_bytes(data)
         return path
     except Exception as e:  # noqa: BLE001
-        rep.log(f"image {idx + 1} openai failed ({e}); using black placeholder", "err")
+        rep.log(f"image {idx + 1} ({o.image_provider}) failed ({e}); using black placeholder", "err")
         path = wd / "images" / f"{stem}.png"
         ffmpeg(["-f", "lavfi", "-i", f"color=c=black:s={size[0]}x{size[1]}", "-frames:v", "1", str(path)])
         return path
@@ -593,7 +613,7 @@ def make_image(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple
     provider = (o.image_provider or IMAGE_PROVIDER).lower()
     if provider == "pollinations":
         return make_image_pollinations(prompt, aspect, wd, idx, size, rep, o)
-    if provider == "openai":
+    if provider in ("openai", "custom"):
         return make_image_openai(client, prompt, aspect, wd, idx, size, rep, o)
     return make_image_gemini(client, prompt, aspect, wd, idx, size, rep, o)
 
@@ -613,15 +633,14 @@ def step_images(story: Story, o: Opts, wd: Path, rep: Reporter, only: list[int] 
             except ImportError:
                 raise PipelineError("pip install google-genai")
             client = genai.Client(api_key=key)
-        elif provider == "openai":
-            key = o.image_key or os.getenv("OPENAI_API_KEY")
-            if not key:
-                raise PipelineError("OpenAI API key for images is not set")
+        elif provider in ("openai", "custom"):
+            key = o.image_key or os.getenv("SV_IMAGE_KEY") or os.getenv("OPENAI_API_KEY") or "custom-key"
+            base_url = o.image_url or os.getenv("SV_IMAGE_URL") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
             try:
                 from openai import OpenAI
             except ImportError:
                 raise PipelineError("pip install openai")
-            client = OpenAI(api_key=key, base_url=o.image_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+            client = OpenAI(api_key=key, base_url=base_url)
         elif provider == "pollinations":
             client = None
         else:

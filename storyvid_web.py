@@ -289,10 +289,12 @@ class Handler(BaseHTTPRequestHandler):
                     "nvidia_key": os.getenv("NVIDIA_API_KEY", "") or os.getenv("SV_LLM_KEY", ""),
                     "gemini_key": os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
                     "openai_key": os.getenv("OPENAI_API_KEY", ""),
+                    "image_key": os.getenv("SV_IMAGE_KEY", "") or os.getenv("OPENAI_API_KEY", "") or os.getenv("GEMINI_API_KEY", ""),
                     "llm_url": sv.LLM_URL,
                     "llm_model": sv.LLM_MODEL,
                     "image_provider": sv.IMAGE_PROVIDER,
                     "image_model": sv.IMAGE_MODEL,
+                    "image_url": sv.IMAGE_URL,
                 },
                 "ffmpeg": bool(shutil.which("ffmpeg")),
                 "tts": {"list": sv.tts_backends(), "default": TTS_DEFAULT},
@@ -300,6 +302,7 @@ class Handler(BaseHTTPRequestHandler):
                 "llm_url": sv.LLM_URL,
                 "image_provider": sv.IMAGE_PROVIDER,
                 "image_model": sv.IMAGE_MODEL,
+                "image_url": sv.IMAGE_URL,
                 "kokoro_voices": sv.KOKORO_VOICES,
             })
         if path == "/api/projects":
@@ -338,12 +341,17 @@ class Handler(BaseHTTPRequestHandler):
                 updates["SV_IMAGE_PROVIDER"] = body["image_provider"]
             if "image_model" in body and body["image_model"]:
                 updates["SV_IMAGE_MODEL"] = body["image_model"]
+            if "image_url" in body and body["image_url"]:
+                updates["SV_IMAGE_URL"] = body["image_url"]
+            if "image_key" in body:
+                updates["SV_IMAGE_KEY"] = body["image_key"]
             sv.update_env(updates)
             return self._json({"ok": True, "settings": {
                 "llm_url": sv.LLM_URL,
                 "llm_model": sv.LLM_MODEL,
                 "image_provider": sv.IMAGE_PROVIDER,
                 "image_model": sv.IMAGE_MODEL,
+                "image_url": sv.IMAGE_URL,
                 "keys": {
                     "nvidia": bool(os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")),
                     "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),

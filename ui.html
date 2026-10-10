@@ -166,12 +166,17 @@ textarea{resize:vertical}
                   <option value="gemini">Google Gemini</option>
                   <option value="pollinations">Pollinations (Free, No Key)</option>
                   <option value="openai">OpenAI (DALL-E)</option>
+                  <option value="custom">Custom AI Endpoint</option>
                 </select>
               </div>
               <div>
                 <label>MODEL</label>
                 <input id="f_img_model" placeholder="gemini-2.5-flash-image">
               </div>
+            </div>
+            <div id="imgUrlBox" hidden>
+              <label>IMAGE ENDPOINT URL</label>
+              <input id="f_img_url" placeholder="https://api.openai.com/v1">
             </div>
             <div id="imgKeyBox">
               <label>IMAGE API KEY</label>
@@ -305,8 +310,8 @@ function renderStatus() {
   const p = ST?.presets || {};
   const ip = $("#f_img_provider")?.value || p.image_provider || "gemini";
   const pr = $("#f_llm_preset")?.value || "nvidia";
-  const imgOk = ip === "pollinations" ? true : (ip === "openai" ? !!(p.openai_key || $("#f_img_key")?.value) : !!(p.gemini_key || $("#f_img_key")?.value));
-  const storyOk = !!(p.nvidia_key || p.openai_key || $("#f_llm_key")?.value || pr === "local");
+  const imgOk = ip === "pollinations" ? true : (ip === "custom" ? !!($("#f_img_url")?.value || p.image_url) : (ip === "openai" ? !!(p.openai_key || $("#f_img_key")?.value) : !!(p.gemini_key || $("#f_img_key")?.value)));
+  const storyOk = !!(p.nvidia_key || p.openai_key || $("#f_llm_key")?.value || pr === "local" || pr === "custom");
   c.replaceChildren(
     chip(`STORY [${pr.toUpperCase()}] ${storyOk ? "✔" : "✖ key"}`, storyOk ? "ok" : "bad"),
     chip(`IMAGES [${ip.toUpperCase()}] ${imgOk ? "✔" : "✖ key"}`, imgOk ? "ok" : "bad"),
@@ -324,6 +329,7 @@ function syncInteg() {
   const pr = $("#f_llm_preset").value;
   const ip = $("#f_img_provider").value;
   $("#imgKeyBox").hidden = ip === "pollinations";
+  $("#imgUrlBox").hidden = ip !== "custom";
   $("#integBadge").textContent = `${pr.toUpperCase()} · ${ip.toUpperCase()}`;
 }
 function fillForm() {
@@ -349,7 +355,8 @@ function fillForm() {
 
   $("#f_img_provider").value = p.image_provider || "gemini";
   $("#f_img_model").value = p.image_model || IMG_PRESETS.gemini.model;
-  $("#f_img_key").value = p.gemini_key || p.openai_key || "";
+  $("#f_img_key").value = p.image_key || p.gemini_key || p.openai_key || "";
+  $("#f_img_url").value = p.image_url || "";
 
   syncInteg();
 }
@@ -366,6 +373,7 @@ function formBody() {
     image_provider: $("#f_img_provider").value,
     image_model: $("#f_img_model").value.trim() || null,
     image_key: $("#f_img_key").value.trim() || null,
+    image_url: $("#f_img_url").value.trim() || null,
   };
 }
 async function submitNew(e) {
@@ -584,6 +592,13 @@ $("#f_img_provider").onchange = () => {
   const p = ST?.presets || {};
   if (ip === "gemini") $("#f_img_key").value = p.gemini_key || "";
   else if (ip === "openai") $("#f_img_key").value = p.openai_key || "";
+  else if (ip === "custom") {
+    $("#f_img_key").value = p.image_key || "";
+    $("#f_img_url").value = p.image_url || "https://api.openai.com/v1";
+    if (!$("#f_img_model").value || $("#f_img_model").value === "gemini-2.5-flash-image" || $("#f_img_model").value === "flux") {
+      $("#f_img_model").value = "dall-e-3";
+    }
+  }
   syncInteg(); renderStatus();
 };
 
@@ -603,7 +618,8 @@ $("#btnSaveDefaults").onclick = async () => {
     llm_url: $("#f_llm_url").value.trim(),
     llm_model: $("#f_llm_model").value.trim(),
     image_provider: ip,
-    image_model: $("#f_img_model").value.trim()
+    image_model: $("#f_img_model").value.trim(),
+    image_url: $("#f_img_url").value.trim(),
   };
   const lk = $("#f_llm_key").value.trim();
   if (pr === "nvidia" && lk) payload.nvidia_key = lk;
@@ -613,6 +629,7 @@ $("#btnSaveDefaults").onclick = async () => {
   const ik = $("#f_img_key").value.trim();
   if (ip === "gemini" && ik) payload.gemini_key = ik;
   else if (ip === "openai" && ik) payload.openai_key = ik;
+  else if (ip === "custom" && ik) payload.image_key = ik;
 
   try {
     await api("/api/settings", "POST", payload);
