@@ -24,6 +24,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import storyvid as sv
 
 HERE = Path(__file__).resolve().parent
@@ -273,6 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             html = (HERE / "ui.html").read_bytes()
             return self._send(200, html, "text/html; charset=utf-8")
         if path == "/api/status":
+            sv.load_env()
             return self._json({
                 "keys": {"nvidia": bool(os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")),
                          "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))},

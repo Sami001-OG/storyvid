@@ -41,10 +41,30 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 
 LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
-LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.3-70b-instruct")
+LLM_MODEL = os.getenv("SV_LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
 IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
 OUT = Path(os.getenv("SV_OUT", "out"))
 CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
+
+def load_env():
+    global LLM_MODEL, LLM_URL, IMAGE_MODEL, OUT, CACHE
+    env_file = Path(__file__).resolve().parent / ".env"
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip().strip("'\"")
+            if k and v:
+                os.environ[k] = v
+    LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
+    LLM_MODEL = os.getenv("SV_LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
+    OUT = Path(os.getenv("SV_OUT", "out"))
+    CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
+
+load_env()
 
 FPS = 30
 PAD = 0.5  # seconds of silence after each scene's narration
@@ -55,7 +75,12 @@ KOKORO_VOICES = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_
 FATAL_STR = ("API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED", "UNAUTHENTICATED")
 FATAL_TYPE = ("AuthenticationError", "PermissionDeniedError")
 
-con = Console()
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+con = Console(legacy_windows=False)
 
 
 class PipelineError(Exception):
@@ -265,7 +290,9 @@ def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, tem
         r = client.chat.completions.create(
             model=LLM_MODEL, temperature=temperature, max_tokens=4096,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
-        return cls.model_validate(extract_json(r.choices[0].message.content or ""))
+        msg = r.choices[0].message
+        raw = msg.content or getattr(msg, "reasoning_content", "") or ""
+        return cls.model_validate(extract_json(raw))
     return retry(call, label, rep, tries=4)
 
 
@@ -671,6 +698,7 @@ def step_render(story: Story, o: Opts, wd: Path, rep: Reporter) -> Path:
 
 
 def run_pipeline(o: Opts, wd: Path, rep: Reporter, story_file: str | None = None) -> Path:
+    load_env()
     if not shutil.which("ffmpeg"):
         raise PipelineError("ffmpeg not found in PATH")
     for d in ("images", "audio", "clips"):

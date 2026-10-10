@@ -41,6 +41,11 @@ There are two ways to run it: a **CLI** (`storyvid.py`) and an **interactive web
 ```bash
 git clone https://github.com/Sami001-OG/storyvid.git
 cd storyvid
+# Use Python 3.10–3.12 (Python 3.12 or 3.11 recommended)
+python -m venv .venv
+source .venv/bin/activate              # Linux/macOS
+# or: .venv\Scripts\activate           # Windows
+
 pip install -r requirements.txt        # and install ffmpeg (see below)
 
 export NVIDIA_API_KEY=nvapi-...        # story + scene split
@@ -57,7 +62,7 @@ Result: `out/<slug>-<hash>/final.mp4`.
 
 ## Requirements
 
-- **Python 3.10+**
+- **Python 3.10–3.12** (`kokoro-onnx` depends on `onnxruntime`, which requires Python <= 3.12; pre-release versions such as Python 3.15 are not supported)
 - **FFmpeg** on `PATH` (`apt install ffmpeg`, `brew install ffmpeg`, `pkg install ffmpeg`). For `--burn-subs` it must be built with libass (most builds are).
 - **Python packages** (`requirements.txt`): `openai` (talks to NIM), `google-genai` (images), `rich` (terminal UI), `numpy`, `kokoro-onnx` (default local TTS).
 - **Optional:** `chatterbox-tts` for the most expressive voice (Python 3.11, GPU strongly recommended), `piper-tts`, or `espeak-ng`.
@@ -327,6 +332,7 @@ Keys are read only when needed: a fully cached project (story, images) needs nei
 
 | Symptom | Fix |
 |---|---|
+| `ResolutionImpossible` / `onnxruntime` has no matching distribution | You are using an unsupported Python version (e.g. Python 3.15 alpha); use Python 3.11 or 3.12 |
 | `ffmpeg not found` | Install FFmpeg and make sure it is on `PATH` |
 | `NVIDIA_API_KEY is not set` / `GEMINI_API_KEY is not set` | Export the key in the shell that launches the app |
 | 429 / rate limit from Gemini | Lower `--workers` to 1 or 2; retries already honor the provider's delay |
