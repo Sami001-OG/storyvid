@@ -42,12 +42,13 @@ from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
 
 LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
 LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
+IMAGE_PROVIDER = os.getenv("SV_IMAGE_PROVIDER", "gemini")
 IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
 OUT = Path(os.getenv("SV_OUT", "out"))
 CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
 
 def load_env():
-    global LLM_MODEL, LLM_URL, IMAGE_MODEL, OUT, CACHE
+    global LLM_MODEL, LLM_URL, IMAGE_PROVIDER, IMAGE_MODEL, OUT, CACHE
     env_file = Path(__file__).resolve().parent / ".env"
     if env_file.is_file():
         for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -60,11 +61,40 @@ def load_env():
                 os.environ[k] = v
     LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
     LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
+    IMAGE_PROVIDER = os.getenv("SV_IMAGE_PROVIDER", "gemini")
     IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
     OUT = Path(os.getenv("SV_OUT", "out"))
     CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
 
 load_env()
+
+def update_env(updates: dict[str, str]) -> None:
+    """Update or append variables in .env file and reload runtime environment."""
+    env_file = Path(__file__).resolve().parent / ".env"
+    lines = []
+    existing = {}
+    if env_file.is_file():
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(lines):
+            line_str = line.strip()
+            if line_str and not line_str.startswith("#") and "=" in line_str:
+                k, _ = line_str.split("=", 1)
+                existing[k.strip()] = idx
+
+    for k, v in updates.items():
+        if not k:
+            continue
+        v_str = str(v or "").strip()
+        os.environ[k] = v_str
+        new_line = f"{k}={v_str}"
+        if k in existing:
+            lines[existing[k]] = new_line
+        else:
+            lines.append(new_line)
+            existing[k] = len(lines) - 1
+
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    load_env()
 
 FPS = 30
 PAD = 0.5  # seconds of silence after each scene's narration
@@ -143,6 +173,15 @@ class Opts:
     workers: int = 3
     kenburns: bool = True
     burn_subs: bool = False
+    # LLM (Story) integration
+    llm_url: str | None = None
+    llm_model: str | None = None
+    llm_key: str | None = None
+    # Image integration
+    image_provider: str = "gemini"  # gemini | pollinations | openai
+    image_model: str | None = None
+    image_key: str | None = None
+    image_url: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Opts":
@@ -177,6 +216,15 @@ class Opts:
         self.voice = (self.voice or "").strip() or None
         self.ref_audio = (self.ref_audio or "").strip() or None
         self.hd, self.kenburns, self.burn_subs = bool(self.hd), bool(self.kenburns), bool(self.burn_subs)
+        self.image_provider = (self.image_provider or IMAGE_PROVIDER).lower().strip()
+        if self.image_provider not in ("gemini", "pollinations", "openai"):
+            self.image_provider = "gemini"
+        self.llm_url = (self.llm_url or "").strip() or None
+        self.llm_model = (self.llm_model or "").strip() or None
+        self.llm_key = (self.llm_key or "").strip() or None
+        self.image_model = (self.image_model or "").strip() or None
+        self.image_key = (self.image_key or "").strip() or None
+        self.image_url = (self.image_url or "").strip() or None
 
     @property
     def size(self) -> tuple[int, int]:
@@ -323,10 +371,11 @@ def extract_json(text: str) -> dict:
     raise ValueError("no JSON object in model output")
 
 
-def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, temperature: float = 0.4):
+def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, model: str | None = None, temperature: float = 0.4):
+    m = model or LLM_MODEL
     def call():
         r = client.chat.completions.create(
-            model=LLM_MODEL, temperature=temperature, max_tokens=4096,
+            model=m, temperature=temperature, max_tokens=4096,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
         msg = r.choices[0].message
         raw = msg.content or getattr(msg, "reasoning_content", "") or ""
@@ -374,8 +423,9 @@ def adjust_scenes(scenes: list[Scene], n: int, style: str, chars: str) -> list[S
     return current
 
 
-def make_story(client, o: Opts, rep: Reporter) -> Story:
+def make_story(client, o: Opts, rep: Reporter, model: str | None = None) -> Story:
     n, lang, style = o.scenes, o.lang, NARRATION[o.narration]
+    m = model or o.llm_model or LLM_MODEL
     bible = llm_json(
         client,
         "You are a master storyteller for short narrated videos. Respond with ONLY a JSON object, "
@@ -385,7 +435,7 @@ def make_story(client, o: Opts, rep: Reporter) -> Story:
         '"visual_style": ONE line defining a single consistent art style for every frame. '
         '"characters": concise visual descriptions of each recurring character '
         "(age, clothing, colors, distinctive features).",
-        o.prompt, Bible, "story", rep)
+        o.prompt, Bible, "story", rep, model=m)
 
     bd = llm_json(
         client,
@@ -398,7 +448,7 @@ def make_story(client, o: Opts, rep: Reporter) -> Story:
         "angle, lighting, mood. Re-describe every visible character's full appearance in each "
         "image_prompt. Never ask for text, captions or logos in the image.",
         f"STYLE: {bible.visual_style}\nCHARACTERS: {bible.characters}\n\nSTORY:\n{bible.story}",
-        Breakdown, "scenes", rep, temperature=0.4)
+        Breakdown, "scenes", rep, model=m, temperature=0.4)
     if not bd.scenes:
         raise ValueError("model returned zero scenes")
     scenes = bd.scenes
@@ -415,24 +465,26 @@ def step_story(o: Opts, wd: Path, rep: Reporter, story_file: str | None = None) 
         story = Story.model_validate_json(sp.read_text(encoding="utf-8"))
         rep.log(f"story loaded from {sp}")
     else:
-        key = os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")
+        url = o.llm_url or LLM_URL
+        model = o.llm_model or LLM_MODEL
+        key = o.llm_key or os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY") or os.getenv("OPENAI_API_KEY")
         if not key:
-            raise PipelineError("NVIDIA_API_KEY is not set")
+            raise PipelineError("Story LLM API key is not set (configure in Web UI or set NVIDIA_API_KEY)")
         try:
             from openai import OpenAI
         except ImportError:
             raise PipelineError("pip install openai")
-        client = OpenAI(base_url=LLM_URL, api_key=key, timeout=120)
+        client = OpenAI(base_url=url, api_key=key, timeout=120)
         rep.stage("STORY", 1)
-        rep.log(f"writing story with {LLM_MODEL}")
-        story = make_story(client, o, rep)
+        rep.log(f"writing story with {model}")
+        story = make_story(client, o, rep, model=model)
         rep.finish("STORY")
     (wd / "story.json").write_text(story.model_dump_json(indent=2), encoding="utf-8")
     rep.event("story")
     return story
 
 
-# ───────────────────────── 2. images (Gemini) ─────────────────────────
+# ───────────────────────── 2. images (Gemini / Pollinations / OpenAI) ─────────────────────────
 def frame_prompt(story: Story, scene: Scene, aspect: str) -> str:
     return (f"{story.visual_style}\n"
             f"Characters (identical appearance in every frame): {story.characters}\n"
@@ -440,20 +492,21 @@ def frame_prompt(story: Story, scene: Scene, aspect: str) -> str:
             f"Aspect ratio {aspect}. No text, captions, letters, logos or watermarks.")
 
 
-def make_image(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
-               rep: Reporter) -> Path:
+def make_image_gemini(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
+                      rep: Reporter, o: Opts) -> Path:
     from google.genai import types
     stem = f"scene_{idx:02d}"
     cached = find_asset(wd / "images", stem)
     if cached:
         return cached
+    model = o.image_model or IMAGE_MODEL
     kw: dict = {"response_modalities": ["TEXT", "IMAGE"]}
     if hasattr(types, "ImageConfig"):
         kw["image_config"] = types.ImageConfig(aspect_ratio=aspect)
     cfg = types.GenerateContentConfig(**kw)
 
     def call():
-        r = client.models.generate_content(model=IMAGE_MODEL, contents=prompt, config=cfg)
+        r = client.models.generate_content(model=model, contents=prompt, config=cfg)
         for c in r.candidates or []:
             for p in (c.content.parts if c.content and c.content.parts else []):
                 if p.inline_data and p.inline_data.data:
@@ -469,28 +522,113 @@ def make_image(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple
     except Exception as e:  # noqa: BLE001
         if type(e).__name__ in FATAL_TYPE or any(s in str(e) for s in FATAL_STR):
             raise
-        rep.log(f"image {idx + 1} failed ({e}); using black placeholder", "err")
+        rep.log(f"image {idx + 1} gemini failed ({e}); using black placeholder", "err")
         path = wd / "images" / f"{stem}.png"
         ffmpeg(["-f", "lavfi", "-i", f"color=c=black:s={size[0]}x{size[1]}", "-frames:v", "1", str(path)])
         return path
 
 
+def make_image_pollinations(prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
+                            rep: Reporter, o: Opts) -> Path:
+    stem = f"scene_{idx:02d}"
+    cached = find_asset(wd / "images", stem)
+    if cached:
+        return cached
+    clean_p = prompt[:600].replace("\n", " ").strip()
+    encoded = urllib.parse.quote(clean_p)
+    model = o.image_model or "flux"
+    url = f"https://image.pollinations.ai/prompt/{encoded}?nologo=true&seed={idx + 42}&model={model}"
+
+    def call():
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 storyvid"})
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            data = resp.read()
+            if not data or len(data) < 500:
+                raise RuntimeError("invalid image from pollinations")
+            ctype = resp.headers.get_content_type()
+            ext = ".jpg" if "jpeg" in ctype else ".png"
+            return data, ext
+
+    try:
+        data, ext = retry(call, f"image {idx + 1}", rep, tries=3)
+        path = wd / "images" / f"{stem}{ext}"
+        path.write_bytes(data)
+        return path
+    except Exception as e:  # noqa: BLE001
+        rep.log(f"image {idx + 1} pollinations failed ({e}); using black placeholder", "err")
+        path = wd / "images" / f"{stem}.png"
+        ffmpeg(["-f", "lavfi", "-i", f"color=c=black:s={size[0]}x{size[1]}", "-frames:v", "1", str(path)])
+        return path
+
+
+def make_image_openai(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
+                      rep: Reporter, o: Opts) -> Path:
+    stem = f"scene_{idx:02d}"
+    cached = find_asset(wd / "images", stem)
+    if cached:
+        return cached
+    model = o.image_model or "dall-e-3"
+    sz = "1792x1024" if aspect == "16:9" else "1024x1792"
+
+    def call():
+        import base64
+        r = client.images.generate(model=model, prompt=prompt[:1000], size=sz, response_format="b64_json")
+        b64 = r.data[0].b64_json
+        return base64.b64decode(b64), ".png"
+
+    try:
+        data, ext = retry(call, f"image {idx + 1}", rep, tries=3)
+        path = wd / "images" / f"{stem}{ext}"
+        path.write_bytes(data)
+        return path
+    except Exception as e:  # noqa: BLE001
+        rep.log(f"image {idx + 1} openai failed ({e}); using black placeholder", "err")
+        path = wd / "images" / f"{stem}.png"
+        ffmpeg(["-f", "lavfi", "-i", f"color=c=black:s={size[0]}x{size[1]}", "-frames:v", "1", str(path)])
+        return path
+
+
+def make_image(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
+               rep: Reporter, o: Opts) -> Path:
+    provider = (o.image_provider or IMAGE_PROVIDER).lower()
+    if provider == "pollinations":
+        return make_image_pollinations(prompt, aspect, wd, idx, size, rep, o)
+    if provider == "openai":
+        return make_image_openai(client, prompt, aspect, wd, idx, size, rep, o)
+    return make_image_gemini(client, prompt, aspect, wd, idx, size, rep, o)
+
+
 def step_images(story: Story, o: Opts, wd: Path, rep: Reporter, only: list[int] | None = None) -> dict:
     idxs = only if only is not None else list(range(len(story.scenes)))
     (wd / "images").mkdir(parents=True, exist_ok=True)
-    gem = None
+    provider = (o.image_provider or IMAGE_PROVIDER).lower()
+    client = None
     if any(find_asset(wd / "images", f"scene_{i:02d}") is None for i in idxs):
-        key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        if not key:
-            raise PipelineError("GEMINI_API_KEY is not set")
-        try:
-            from google import genai
-        except ImportError:
-            raise PipelineError("pip install google-genai")
-        gem = genai.Client(api_key=key)
+        if provider == "gemini":
+            key = o.image_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not key:
+                raise PipelineError("GEMINI_API_KEY is not set (configure in Web UI or .env)")
+            try:
+                from google import genai
+            except ImportError:
+                raise PipelineError("pip install google-genai")
+            client = genai.Client(api_key=key)
+        elif provider == "openai":
+            key = o.image_key or os.getenv("OPENAI_API_KEY")
+            if not key:
+                raise PipelineError("OpenAI API key for images is not set")
+            try:
+                from openai import OpenAI
+            except ImportError:
+                raise PipelineError("pip install openai")
+            client = OpenAI(api_key=key, base_url=o.image_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+        elif provider == "pollinations":
+            client = None
+        else:
+            raise PipelineError(f"unknown image provider: {provider}")
 
     def one(i: int) -> Path:
-        p = make_image(gem, frame_prompt(story, story.scenes[i], o.aspect), o.aspect, wd, i, o.size, rep)
+        p = make_image(client, frame_prompt(story, story.scenes[i], o.aspect), o.aspect, wd, i, o.size, rep, o)
         rep.event("asset", scene=i, kind="image")
         return p
 
@@ -812,6 +950,13 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=3, help="parallel Gemini image calls")
     ap.add_argument("--no-kenburns", action="store_true", help="disable zoom/pan motion")
     ap.add_argument("--burn-subs", action="store_true", help="burn captions into the video")
+    ap.add_argument("--llm-url", help="OpenAI-compatible LLM endpoint URL")
+    ap.add_argument("--llm-model", help="story model name")
+    ap.add_argument("--llm-key", help="story LLM API key")
+    ap.add_argument("--image-provider", choices=["gemini", "pollinations", "openai"], default="gemini")
+    ap.add_argument("--image-model", help="image model name (e.g. gemini-2.5-flash-image, flux, dall-e-3)")
+    ap.add_argument("--image-key", help="image generation API key")
+    ap.add_argument("--image-url", help="custom image generation endpoint URL")
     ap.add_argument("--workdir", help="output dir (default: out/<slug>-<hash>)")
     ap.add_argument("--story", help="use an existing story.json instead of generating")
     ap.add_argument("--force", action="store_true", help="discard cached images/audio")
@@ -822,7 +967,10 @@ def main() -> int:
         "prompt": a.prompt, "scenes": a.scenes, "aspect": a.aspect, "hd": a.hd, "lang": a.lang,
         "narration": a.narration, "tts": a.tts, "voice": a.voice, "tts_lang": a.tts_lang,
         "speed": a.speed, "exaggeration": a.exaggeration, "ref_audio": a.ref_audio,
-        "workers": a.workers, "kenburns": not a.no_kenburns, "burn_subs": a.burn_subs})
+        "workers": a.workers, "kenburns": not a.no_kenburns, "burn_subs": a.burn_subs,
+        "llm_url": a.llm_url, "llm_model": a.llm_model, "llm_key": a.llm_key,
+        "image_provider": a.image_provider, "image_model": a.image_model,
+        "image_key": a.image_key, "image_url": a.image_url})
 
     key = hashlib.sha1(f"{o.prompt}|{o.scenes}|{o.aspect}|{o.lang}".encode()).hexdigest()[:6]
     slug = re.sub(r"[^a-z0-9]+", "-", o.prompt.lower())[:30].strip("-") or "story"

@@ -277,14 +277,29 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             html = (HERE / "ui.html").read_bytes()
             return self._send(200, html, "text/html; charset=utf-8")
-        if path == "/api/status":
+        if path in ("/api/status", "/api/settings"):
             sv.load_env()
             return self._json({
-                "keys": {"nvidia": bool(os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")),
-                         "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))},
+                "keys": {
+                    "nvidia": bool(os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")),
+                    "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+                    "openai": bool(os.getenv("OPENAI_API_KEY")),
+                },
+                "presets": {
+                    "nvidia_key": os.getenv("NVIDIA_API_KEY", "") or os.getenv("SV_LLM_KEY", ""),
+                    "gemini_key": os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", ""),
+                    "openai_key": os.getenv("OPENAI_API_KEY", ""),
+                    "llm_url": sv.LLM_URL,
+                    "llm_model": sv.LLM_MODEL,
+                    "image_provider": sv.IMAGE_PROVIDER,
+                    "image_model": sv.IMAGE_MODEL,
+                },
                 "ffmpeg": bool(shutil.which("ffmpeg")),
                 "tts": {"list": sv.tts_backends(), "default": TTS_DEFAULT},
-                "llm_model": sv.LLM_MODEL, "image_model": sv.IMAGE_MODEL,
+                "llm_model": sv.LLM_MODEL,
+                "llm_url": sv.LLM_URL,
+                "image_provider": sv.IMAGE_PROVIDER,
+                "image_model": sv.IMAGE_MODEL,
                 "kokoro_voices": sv.KOKORO_VOICES,
             })
         if path == "/api/projects":
@@ -306,6 +321,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self):
         path = urlparse(self.path).path
+        if path == "/api/settings":
+            body = self._body()
+            updates = {}
+            if "nvidia_key" in body:
+                updates["NVIDIA_API_KEY"] = body["nvidia_key"]
+            if "gemini_key" in body:
+                updates["GEMINI_API_KEY"] = body["gemini_key"]
+            if "openai_key" in body:
+                updates["OPENAI_API_KEY"] = body["openai_key"]
+            if "llm_url" in body and body["llm_url"]:
+                updates["SV_LLM_URL"] = body["llm_url"]
+            if "llm_model" in body and body["llm_model"]:
+                updates["SV_LLM_MODEL"] = body["llm_model"]
+            if "image_provider" in body and body["image_provider"]:
+                updates["SV_IMAGE_PROVIDER"] = body["image_provider"]
+            if "image_model" in body and body["image_model"]:
+                updates["SV_IMAGE_MODEL"] = body["image_model"]
+            sv.update_env(updates)
+            return self._json({"ok": True, "settings": {
+                "llm_url": sv.LLM_URL,
+                "llm_model": sv.LLM_MODEL,
+                "image_provider": sv.IMAGE_PROVIDER,
+                "image_model": sv.IMAGE_MODEL,
+                "keys": {
+                    "nvidia": bool(os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")),
+                    "gemini": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+                    "openai": bool(os.getenv("OPENAI_API_KEY")),
+                }
+            }})
         if path == "/api/projects":
             return self._create(self._body())
         if path == "/api/preview":

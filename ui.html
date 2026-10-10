@@ -88,7 +88,7 @@ textarea{resize:vertical}
 <body>
 <header>
   <h1>▌STORYVID<i>_</i></h1>
-  <span style="color:var(--mut);font-size:12px">nim story → gemini frames → local voice → video</span>
+  <span style="color:var(--mut);font-size:12px">story llm → image frames → local voice → video</span>
   <div class="chips" id="chips"></div>
 </header>
 
@@ -126,6 +126,67 @@ textarea{resize:vertical}
           <label><input type="checkbox" id="f_kb" checked> ken burns</label>
           <label><input type="checkbox" id="f_subs"> burn subs</label>
         </div>
+
+        <details id="integBox" style="margin-top:14px;border:1px solid var(--line);padding:8px 10px;background:#050c07">
+          <summary style="cursor:pointer;color:var(--dim);font-size:11px;letter-spacing:.14em;font-weight:bold;user-select:none">
+            ⚙ AI INTEGRATION &amp; PRESETS <span id="integBadge" style="color:var(--fg);font-size:10px;float:right"></span>
+          </summary>
+          <div style="margin-top:10px">
+            <label style="color:var(--fg);font-weight:bold;border-bottom:1px solid #0f2c18;padding-bottom:3px">STORY LLM</label>
+            <div class="row">
+              <div>
+                <label>PROVIDER</label>
+                <select id="f_llm_preset">
+                  <option value="nvidia">NVIDIA NIM</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="groq">Groq</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="local">Local (Ollama/vLLM)</option>
+                  <option value="custom">Custom Endpoint</option>
+                </select>
+              </div>
+              <div>
+                <label>MODEL</label>
+                <input id="f_llm_model" placeholder="meta/llama-3.2-11b-vision-instruct">
+              </div>
+            </div>
+            <label>API KEY</label>
+            <div style="display:flex;gap:4px">
+              <input id="f_llm_key" type="password" placeholder="Preset loaded from server" style="flex:1">
+              <button type="button" class="btn sm" id="btnToggleLlmKey" title="Show/Hide">👁</button>
+            </div>
+            <label>ENDPOINT URL</label>
+            <input id="f_llm_url" placeholder="https://integrate.api.nvidia.com/v1">
+
+            <label style="color:var(--fg);font-weight:bold;border-bottom:1px solid #0f2c18;padding-bottom:3px;margin-top:14px">IMAGE GENERATION</label>
+            <div class="row">
+              <div>
+                <label>PROVIDER</label>
+                <select id="f_img_provider">
+                  <option value="gemini">Google Gemini</option>
+                  <option value="pollinations">Pollinations (Free, No Key)</option>
+                  <option value="openai">OpenAI (DALL-E)</option>
+                </select>
+              </div>
+              <div>
+                <label>MODEL</label>
+                <input id="f_img_model" placeholder="gemini-2.5-flash-image">
+              </div>
+            </div>
+            <div id="imgKeyBox">
+              <label>IMAGE API KEY</label>
+              <div style="display:flex;gap:4px">
+                <input id="f_img_key" type="password" placeholder="Preset loaded from server" style="flex:1">
+                <button type="button" class="btn sm" id="btnToggleImgKey" title="Show/Hide">👁</button>
+              </div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:6px;justify-content:space-between;align-items:center">
+              <span id="saveStatus" style="font-size:11px;color:var(--mut)"></span>
+              <button type="button" class="btn sm" id="btnSaveDefaults">💾 Save as defaults</button>
+            </div>
+          </div>
+        </details>
+
         <div class="acts" style="margin-top:12px"><button type="button" class="btn sm" id="btnTest">▶ test voice</button></div>
         <button class="btn primary" id="btnRun" type="submit">&gt; execute</button>
       </form>
@@ -222,14 +283,35 @@ function toast(msg) {
 
 let ST = null, cur = null, es = null, state = null, busy = false, stages = {}, starts = [], rt = null;
 
+/* ───── presets & integration ───── */
+const LLM_PRESETS = {
+  nvidia: { url: "https://integrate.api.nvidia.com/v1", model: "meta/llama-3.2-11b-vision-instruct" },
+  openai: { url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  groq: { url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  openrouter: { url: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct" },
+  local: { url: "http://localhost:11434/v1", model: "llama3.2" },
+  custom: { url: "", model: "" }
+};
+const IMG_PRESETS = {
+  gemini: { model: "gemini-2.5-flash-image" },
+  pollinations: { model: "flux" },
+  openai: { model: "dall-e-3" }
+};
+
 /* ───── status / form ───── */
 function chip(text, cls) { return h("span", { class: "chip " + cls, text }); }
 function renderStatus() {
-  const c = $("#chips"); c.replaceChildren(
-    chip(`NIM ${ST.keys.nvidia ? "✔" : "✖ key"}`, ST.keys.nvidia ? "ok" : "bad"),
-    chip(`GEMINI ${ST.keys.gemini ? "✔" : "✖ key"}`, ST.keys.gemini ? "ok" : "bad"),
-    chip(`FFMPEG ${ST.ffmpeg ? "✔" : "✖"}`, ST.ffmpeg ? "ok" : "bad"),
-    chip(`TTS ${ST.tts.default || "none"}`, ST.tts.default ? "ok" : "bad"),
+  const c = $("#chips");
+  const p = ST?.presets || {};
+  const ip = $("#f_img_provider")?.value || p.image_provider || "gemini";
+  const pr = $("#f_llm_preset")?.value || "nvidia";
+  const imgOk = ip === "pollinations" ? true : (ip === "openai" ? !!(p.openai_key || $("#f_img_key")?.value) : !!(p.gemini_key || $("#f_img_key")?.value));
+  const storyOk = !!(p.nvidia_key || p.openai_key || $("#f_llm_key")?.value || pr === "local");
+  c.replaceChildren(
+    chip(`STORY [${pr.toUpperCase()}] ${storyOk ? "✔" : "✖ key"}`, storyOk ? "ok" : "bad"),
+    chip(`IMAGES [${ip.toUpperCase()}] ${imgOk ? "✔" : "✖ key"}`, imgOk ? "ok" : "bad"),
+    chip(`FFMPEG ${ST?.ffmpeg ? "✔" : "✖"}`, ST?.ffmpeg ? "ok" : "bad"),
+    chip(`TTS ${ST?.tts?.default || "none"}`, ST?.tts?.default ? "ok" : "bad"),
   );
 }
 function effTts() { const v = $("#f_tts").value; return v === "auto" ? ST.tts.default : v; }
@@ -238,6 +320,12 @@ function syncForm() {
   $("#cbox").hidden = t !== "chatterbox";
   $("#f_voice").placeholder = { kokoro: "af_heart", piper: "/path/voice.onnx", espeak: "en-us", chatterbox: "(uses reference voice)" }[t] || "";
 }
+function syncInteg() {
+  const pr = $("#f_llm_preset").value;
+  const ip = $("#f_img_provider").value;
+  $("#imgKeyBox").hidden = ip === "pollinations";
+  $("#integBadge").textContent = `${pr.toUpperCase()} · ${ip.toUpperCase()}`;
+}
 function fillForm() {
   const sel = $("#f_tts");
   for (const b of ST.tts.list) sel.append(h("option", { value: b.name, disabled: !b.ok && b.name !== "auto", text: b.name + (b.ok ? "" : " (not installed)") }));
@@ -245,6 +333,25 @@ function fillForm() {
   sel.onchange = syncForm; syncForm();
   $("#f_speed").oninput = e => ($("#v_speed").textContent = (+e.target.value).toFixed(2));
   $("#f_exag").oninput = e => ($("#v_exag").textContent = (+e.target.value).toFixed(2));
+
+  // Initialize presets and integration values
+  const p = ST?.presets || {};
+  if (p.llm_url?.includes("nvidia.com")) $("#f_llm_preset").value = "nvidia";
+  else if (p.llm_url?.includes("openai.com")) $("#f_llm_preset").value = "openai";
+  else if (p.llm_url?.includes("groq.com")) $("#f_llm_preset").value = "groq";
+  else if (p.llm_url?.includes("openrouter.ai")) $("#f_llm_preset").value = "openrouter";
+  else if (p.llm_url?.includes("localhost") || p.llm_url?.includes("127.0.0.1")) $("#f_llm_preset").value = "local";
+  else if (p.llm_url) $("#f_llm_preset").value = "custom";
+
+  $("#f_llm_url").value = p.llm_url || LLM_PRESETS.nvidia.url;
+  $("#f_llm_model").value = p.llm_model || LLM_PRESETS.nvidia.model;
+  $("#f_llm_key").value = p.nvidia_key || p.openai_key || "";
+
+  $("#f_img_provider").value = p.image_provider || "gemini";
+  $("#f_img_model").value = p.image_model || IMG_PRESETS.gemini.model;
+  $("#f_img_key").value = p.gemini_key || p.openai_key || "";
+
+  syncInteg();
 }
 function formBody() {
   return {
@@ -253,6 +360,12 @@ function formBody() {
     voice: $("#f_voice").value.trim() || null, tts_lang: $("#f_ttslang").value,
     speed: +$("#f_speed").value, exaggeration: +$("#f_exag").value, ref_audio: $("#f_ref").value.trim() || null,
     hd: $("#f_hd").checked, kenburns: $("#f_kb").checked, burn_subs: $("#f_subs").checked,
+    llm_url: $("#f_llm_url").value.trim() || null,
+    llm_model: $("#f_llm_model").value.trim() || null,
+    llm_key: $("#f_llm_key").value.trim() || null,
+    image_provider: $("#f_img_provider").value,
+    image_model: $("#f_img_model").value.trim() || null,
+    image_key: $("#f_img_key").value.trim() || null,
   };
 }
 async function submitNew(e) {
@@ -451,6 +564,68 @@ $("#back").onclick = () => (location.hash = "#/");
 $("#newForm").addEventListener("submit", submitNew);
 $("#f_prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#newForm").requestSubmit(); });
 $("#btnTest").onclick = testVoice;
+
+$("#f_llm_preset").onchange = () => {
+  const pr = $("#f_llm_preset").value;
+  if (LLM_PRESETS[pr]) {
+    if (LLM_PRESETS[pr].url) $("#f_llm_url").value = LLM_PRESETS[pr].url;
+    if (LLM_PRESETS[pr].model) $("#f_llm_model").value = LLM_PRESETS[pr].model;
+  }
+  const p = ST?.presets || {};
+  if (pr === "nvidia") $("#f_llm_key").value = p.nvidia_key || "";
+  else if (pr === "openai") $("#f_llm_key").value = p.openai_key || "";
+  else if (pr === "local") $("#f_llm_key").value = "none";
+  syncInteg(); renderStatus();
+};
+
+$("#f_img_provider").onchange = () => {
+  const ip = $("#f_img_provider").value;
+  if (IMG_PRESETS[ip]) $("#f_img_model").value = IMG_PRESETS[ip].model;
+  const p = ST?.presets || {};
+  if (ip === "gemini") $("#f_img_key").value = p.gemini_key || "";
+  else if (ip === "openai") $("#f_img_key").value = p.openai_key || "";
+  syncInteg(); renderStatus();
+};
+
+$("#btnToggleLlmKey").onclick = () => {
+  const k = $("#f_llm_key"); k.type = k.type === "password" ? "text" : "password";
+};
+$("#btnToggleImgKey").onclick = () => {
+  const k = $("#f_img_key"); k.type = k.type === "password" ? "text" : "password";
+};
+
+$("#btnSaveDefaults").onclick = async () => {
+  const b = $("#btnSaveDefaults"); b.disabled = true;
+  const stMsg = $("#saveStatus"); stMsg.textContent = "Saving…";
+  const pr = $("#f_llm_preset").value;
+  const ip = $("#f_img_provider").value;
+  const payload = {
+    llm_url: $("#f_llm_url").value.trim(),
+    llm_model: $("#f_llm_model").value.trim(),
+    image_provider: ip,
+    image_model: $("#f_img_model").value.trim()
+  };
+  const lk = $("#f_llm_key").value.trim();
+  if (pr === "nvidia" && lk) payload.nvidia_key = lk;
+  else if (pr === "openai" && lk) payload.openai_key = lk;
+  else if (lk) payload.nvidia_key = lk;
+
+  const ik = $("#f_img_key").value.trim();
+  if (ip === "gemini" && ik) payload.gemini_key = ik;
+  else if (ip === "openai" && ik) payload.openai_key = ik;
+
+  try {
+    await api("/api/settings", "POST", payload);
+    ST = await api("/api/status");
+    stMsg.textContent = "✔ Saved defaults!";
+    setTimeout(() => { stMsg.textContent = ""; }, 3500);
+    renderStatus();
+  } catch (err) {
+    stMsg.textContent = "✖ " + err.message;
+  }
+  b.disabled = false;
+};
+
 window.addEventListener("hashchange", route);
 
 (async () => {
