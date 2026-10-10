@@ -35,13 +35,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from rich.console import Console
 from rich.progress import (BarColumn, MofNCompleteColumn, Progress,
                            SpinnerColumn, TextColumn, TimeElapsedColumn)
 
 LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
-LLM_MODEL = os.getenv("SV_LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
 IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
 OUT = Path(os.getenv("SV_OUT", "out"))
 CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
@@ -59,7 +59,7 @@ def load_env():
             if k and v:
                 os.environ[k] = v
     LLM_URL = os.getenv("SV_LLM_URL", "https://integrate.api.nvidia.com/v1")
-    LLM_MODEL = os.getenv("SV_LLM_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    LLM_MODEL = os.getenv("SV_LLM_MODEL", "meta/llama-3.2-11b-vision-instruct")
     IMAGE_MODEL = os.getenv("SV_IMAGE_MODEL", "gemini-2.5-flash-image")
     OUT = Path(os.getenv("SV_OUT", "out"))
     CACHE = Path(os.getenv("SV_CACHE", Path.home() / ".cache" / "storyvid"))
@@ -195,12 +195,30 @@ class Story(BaseModel):
     characters: str
     scenes: list[Scene]
 
+    @field_validator("characters", mode="before")
+    @classmethod
+    def normalize_characters(cls, v):
+        if isinstance(v, dict):
+            return "; ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return "; ".join(str(x) for x in v)
+        return str(v)
+
 
 class Bible(BaseModel):
     title: str
     visual_style: str
     characters: str
     story: str
+
+    @field_validator("characters", mode="before")
+    @classmethod
+    def normalize_characters(cls, v):
+        if isinstance(v, dict):
+            return "; ".join(f"{k}: {val}" for k, val in v.items())
+        if isinstance(v, list):
+            return "; ".join(str(x) for x in v)
+        return str(v)
 
 
 class Breakdown(BaseModel):
@@ -278,14 +296,34 @@ TTS_RULES = ("Write for text-to-speech: spell out numbers and symbols, no abbrev
 
 
 def extract_json(text: str) -> dict:
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.I)
-    a, b = text.find("{"), text.rfind("}")
-    if a < 0 or b <= a:
-        raise ValueError("no JSON object in model output")
-    return json.loads(text[a:b + 1])
+    text = text.strip()
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I).strip()
+    a, b = clean.find("{"), clean.rfind("}")
+    if a >= 0 and b > a:
+        try:
+            return json.loads(clean[a:b + 1])
+        except Exception:
+            pass
+    for kw in ('"scenes"', '"title"'):
+        idx = text.find(kw)
+        if idx >= 0:
+            brace = text.rfind("{", 0, idx)
+            b = text.rfind("}")
+            if brace >= 0 and b > brace:
+                try:
+                    return json.loads(text[brace:b + 1])
+                except Exception:
+                    pass
+    raise ValueError("no JSON object in model output")
 
 
-def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, temperature: float = 0.8):
+def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, temperature: float = 0.4):
     def call():
         r = client.chat.completions.create(
             model=LLM_MODEL, temperature=temperature, max_tokens=4096,
