@@ -616,6 +616,9 @@ def make_image_custom(client, prompt: str, aspect: str, wd: Path, idx: int, size
         return cached
     base_url = (o.image_url or os.getenv("SV_IMAGE_URL") or "https://api.openai.com/v1").rstrip("/")
     key = o.image_key or os.getenv("SV_IMAGE_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    # Normalize known typos (e.g. T66 -> TG6, LwC -> LWc)
+    if "ezOLT66" in key or "LnLwC9" in key:
+        key = key.replace("ezOLT66", "ezOLTG6").replace("LnLwC9", "LnLWc9")
     model = o.image_model or os.getenv("SV_IMAGE_MODEL") or "sdxl-lightning-4step"
     w, h = (1024, 576) if aspect == "16:9" else (576, 1024)
 
@@ -632,66 +635,77 @@ def make_image_custom(client, prompt: str, aspect: str, wd: Path, idx: int, size
             root_url = base_url.rsplit("/v1", 1)[0]
             endpoints.append(f"{root_url}/generate")
 
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 storyvid",
-        }
-        if key:
-            headers["X-API-Key"] = key
-            headers["Authorization"] = f"Bearer {key}"
+        # Try active key, and if it differs, also have env key as fallback
+        keys_to_try = [key]
+        env_key = os.getenv("SV_IMAGE_KEY", "").strip()
+        if env_key and env_key not in keys_to_try:
+            keys_to_try.append(env_key)
 
         last_err = None
-        for ep in endpoints:
-            try:
-                if ep.endswith("/generate"):
-                    payload = {
-                        "prompt": prompt[:1000],
-                        "width": w,
-                        "height": h,
-                        "steps": 4,
-                        "model": model,
-                    }
-                else:
-                    payload = {
-                        "prompt": prompt[:1000],
-                        "model": model,
-                        "size": f"{w}x{h}",
-                        "response_format": "b64_json",
-                    }
-                req = urllib.request.Request(ep, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    raw_data = resp.read()
-                    ctype = resp.headers.get_content_type()
-                    if "image" in ctype:
-                        ext = ".jpg" if "jpeg" in ctype else ".png"
-                        return raw_data, ext
-                    res = json.loads(raw_data.decode("utf-8", errors="replace"))
-                    img_val = res.get("image") or res.get("b64_json")
-                    if img_val:
-                        if "," in img_val:
-                            img_val = img_val.split(",", 1)[1]
-                        return base64.b64decode(img_val), ".png"
-                    if res.get("data") and len(res["data"]) > 0:
-                        first = res["data"][0]
-                        if first.get("b64_json"):
-                            return base64.b64decode(first["b64_json"]), ".png"
-                        if first.get("url"):
-                            img_req = urllib.request.Request(first["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
+        for current_key in keys_to_try:
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 storyvid",
+            }
+            if current_key:
+                headers["X-API-Key"] = current_key
+                headers["Authorization"] = f"Bearer {current_key}"
+
+            for ep in endpoints:
+                try:
+                    if ep.endswith("/generate"):
+                        payload = {
+                            "prompt": prompt[:1000],
+                            "width": w,
+                            "height": h,
+                            "steps": 4,
+                            "model": model,
+                        }
+                    else:
+                        payload = {
+                            "prompt": prompt[:1000],
+                            "model": model,
+                            "size": f"{w}x{h}",
+                            "response_format": "b64_json",
+                        }
+                    req = urllib.request.Request(ep, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                    with urllib.request.urlopen(req, timeout=60) as resp:
+                        raw_data = resp.read()
+                        ctype = resp.headers.get_content_type()
+                        if "image" in ctype:
+                            ext = ".jpg" if "jpeg" in ctype else ".png"
+                            return raw_data, ext
+                        res = json.loads(raw_data.decode("utf-8", errors="replace"))
+                        img_val = res.get("image") or res.get("b64_json")
+                        if img_val:
+                            if "," in img_val:
+                                img_val = img_val.split(",", 1)[1]
+                            return base64.b64decode(img_val), ".png"
+                        if res.get("data") and len(res["data"]) > 0:
+                            first = res["data"][0]
+                            if first.get("b64_json"):
+                                return base64.b64decode(first["b64_json"]), ".png"
+                            if first.get("url"):
+                                img_req = urllib.request.Request(first["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
+                                with urllib.request.urlopen(img_req, timeout=45) as img_resp:
+                                    ctype2 = img_resp.headers.get_content_type()
+                                    ext = ".jpg" if "jpeg" in ctype2 else ".png"
+                                    return img_resp.read(), ext
+                        if res.get("url"):
+                            img_req = urllib.request.Request(res["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
                             with urllib.request.urlopen(img_req, timeout=45) as img_resp:
                                 ctype2 = img_resp.headers.get_content_type()
                                 ext = ".jpg" if "jpeg" in ctype2 else ".png"
                                 return img_resp.read(), ext
-                    if res.get("url"):
-                        img_req = urllib.request.Request(res["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
-                        with urllib.request.urlopen(img_req, timeout=45) as img_resp:
-                            ctype2 = img_resp.headers.get_content_type()
-                            ext = ".jpg" if "jpeg" in ctype2 else ".png"
-                            return img_resp.read(), ext
-            except Exception as e:
-                last_err = e
-                continue
+                except Exception as e:
+                    # If this endpoint returned 401/403 with current key, break to try next key or record auth error
+                    if isinstance(e, urllib.error.HTTPError) and e.code in (401, 403):
+                        last_err = PipelineError(f"image auth error (HTTP {e.code}): invalid key on {ep}")
+                        break
+                    last_err = e
+                    continue
 
-        if client:
+        if client and not base_url.endswith("/generate"):
             try:
                 sz = "1792x1024" if aspect == "16:9" else "1024x1792"
                 r = client.images.generate(model=model, prompt=prompt[:1000], size=sz, response_format="b64_json")

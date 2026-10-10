@@ -388,6 +388,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── actions
     def _create(self, body: dict):
+        if not body.get("image_key") or "ezOLT66" in str(body.get("image_key")):
+            body["image_key"] = os.getenv("SV_IMAGE_KEY", "")
+        if not body.get("image_url"):
+            body["image_url"] = os.getenv("SV_IMAGE_URL", "")
+        if not body.get("image_model"):
+            body["image_model"] = os.getenv("SV_IMAGE_MODEL", "")
         o = sv.Opts.from_dict(body)
         slug = re.sub(r"[^a-z0-9]+", "-", o.prompt.lower())[:30].strip("-") or "story"
         pid = f"{slug}-{time.strftime('%y%m%d-%H%M%S')}-{os.urandom(2).hex()}"
