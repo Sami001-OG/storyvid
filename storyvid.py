@@ -608,12 +608,122 @@ def make_image_openai(client, prompt: str, aspect: str, wd: Path, idx: int, size
         return path
 
 
+def make_image_custom(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
+                      rep: Reporter, o: Opts) -> Path:
+    stem = f"scene_{idx:02d}"
+    cached = find_asset(wd / "images", stem)
+    if cached:
+        return cached
+    base_url = (o.image_url or os.getenv("SV_IMAGE_URL") or "https://api.openai.com/v1").rstrip("/")
+    key = o.image_key or os.getenv("SV_IMAGE_KEY") or os.getenv("OPENAI_API_KEY") or ""
+    model = o.image_model or os.getenv("SV_IMAGE_MODEL") or "sdxl-lightning-4step"
+    w, h = (1024, 576) if aspect == "16:9" else (576, 1024)
+
+    def call():
+        import base64
+        endpoints = []
+        if base_url.endswith("/generate"):
+            endpoints.append(base_url)
+        elif "/v1" not in base_url:
+            endpoints.append(f"{base_url}/generate")
+            endpoints.append(f"{base_url}/v1/images/generations")
+        else:
+            endpoints.append(base_url if base_url.endswith("/images/generations") else f"{base_url}/images/generations")
+            root_url = base_url.rsplit("/v1", 1)[0]
+            endpoints.append(f"{root_url}/generate")
+
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 storyvid",
+        }
+        if key:
+            headers["X-API-Key"] = key
+            headers["Authorization"] = f"Bearer {key}"
+
+        last_err = None
+        for ep in endpoints:
+            try:
+                if ep.endswith("/generate"):
+                    payload = {
+                        "prompt": prompt[:1000],
+                        "width": w,
+                        "height": h,
+                        "steps": 4,
+                        "model": model,
+                    }
+                else:
+                    payload = {
+                        "prompt": prompt[:1000],
+                        "model": model,
+                        "size": f"{w}x{h}",
+                        "response_format": "b64_json",
+                    }
+                req = urllib.request.Request(ep, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    raw_data = resp.read()
+                    ctype = resp.headers.get_content_type()
+                    if "image" in ctype:
+                        ext = ".jpg" if "jpeg" in ctype else ".png"
+                        return raw_data, ext
+                    res = json.loads(raw_data.decode("utf-8", errors="replace"))
+                    img_val = res.get("image") or res.get("b64_json")
+                    if img_val:
+                        if "," in img_val:
+                            img_val = img_val.split(",", 1)[1]
+                        return base64.b64decode(img_val), ".png"
+                    if res.get("data") and len(res["data"]) > 0:
+                        first = res["data"][0]
+                        if first.get("b64_json"):
+                            return base64.b64decode(first["b64_json"]), ".png"
+                        if first.get("url"):
+                            img_req = urllib.request.Request(first["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
+                            with urllib.request.urlopen(img_req, timeout=45) as img_resp:
+                                ctype2 = img_resp.headers.get_content_type()
+                                ext = ".jpg" if "jpeg" in ctype2 else ".png"
+                                return img_resp.read(), ext
+                    if res.get("url"):
+                        img_req = urllib.request.Request(res["url"], headers={"User-Agent": "Mozilla/5.0 storyvid"})
+                        with urllib.request.urlopen(img_req, timeout=45) as img_resp:
+                            ctype2 = img_resp.headers.get_content_type()
+                            ext = ".jpg" if "jpeg" in ctype2 else ".png"
+                            return img_resp.read(), ext
+            except Exception as e:
+                last_err = e
+                continue
+
+        if client:
+            try:
+                sz = "1792x1024" if aspect == "16:9" else "1024x1792"
+                r = client.images.generate(model=model, prompt=prompt[:1000], size=sz, response_format="b64_json")
+                if r and getattr(r, "data", None) and len(r.data) > 0:
+                    item = r.data[0]
+                    if getattr(item, "b64_json", None):
+                        return base64.b64decode(item.b64_json), ".png"
+            except Exception as e:
+                last_err = e
+
+        raise last_err or RuntimeError("no image returned from custom endpoint")
+
+    try:
+        data, ext = retry(call, f"image {idx + 1}", rep, tries=3)
+        path = wd / "images" / f"{stem}{ext}"
+        path.write_bytes(data)
+        return path
+    except Exception as e:  # noqa: BLE001
+        rep.log(f"image {idx + 1} (custom) failed ({e}); using black placeholder", "err")
+        path = wd / "images" / f"{stem}.png"
+        ffmpeg(["-f", "lavfi", "-i", f"color=c=black:s={size[0]}x{size[1]}", "-frames:v", "1", str(path)])
+        return path
+
+
 def make_image(client, prompt: str, aspect: str, wd: Path, idx: int, size: tuple[int, int],
                rep: Reporter, o: Opts) -> Path:
     provider = (o.image_provider or IMAGE_PROVIDER).lower()
     if provider == "pollinations":
         return make_image_pollinations(prompt, aspect, wd, idx, size, rep, o)
-    if provider in ("openai", "custom"):
+    if provider == "custom":
+        return make_image_custom(client, prompt, aspect, wd, idx, size, rep, o)
+    if provider == "openai":
         return make_image_openai(client, prompt, aspect, wd, idx, size, rep, o)
     return make_image_gemini(client, prompt, aspect, wd, idx, size, rep, o)
 
@@ -638,9 +748,9 @@ def step_images(story: Story, o: Opts, wd: Path, rep: Reporter, only: list[int] 
             base_url = o.image_url or os.getenv("SV_IMAGE_URL") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
             try:
                 from openai import OpenAI
-            except ImportError:
-                raise PipelineError("pip install openai")
-            client = OpenAI(api_key=key, base_url=base_url)
+                client = OpenAI(api_key=key, base_url=base_url)
+            except Exception:
+                client = None
         elif provider == "pollinations":
             client = None
         else:

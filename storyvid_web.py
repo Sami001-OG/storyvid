@@ -400,6 +400,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _resume(self, p: Proj):
         o = sv.load_cfg(p.wd)
+        sv.load_env()
+        if os.getenv("SV_IMAGE_KEY"):
+            o.image_key = os.getenv("SV_IMAGE_KEY")
+        if os.getenv("SV_IMAGE_URL"):
+            o.image_url = os.getenv("SV_IMAGE_URL")
+        if os.getenv("SV_IMAGE_MODEL"):
+            o.image_model = os.getenv("SV_IMAGE_MODEL")
+        if os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY"):
+            o.llm_key = os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")
+        sv.save_cfg(o, p.wd)
         if not p.claim():
             raise Err(409, "project is busy")
         launch(p, "resume", lambda rep: sv.run_pipeline(o, p.wd, rep))
@@ -421,6 +431,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _scene(self, p: Proj, i: int, body: dict):
         o = sv.load_cfg(p.wd)
+        sv.load_env()
+        if os.getenv("SV_IMAGE_KEY"):
+            o.image_key = os.getenv("SV_IMAGE_KEY")
+        if os.getenv("SV_IMAGE_URL"):
+            o.image_url = os.getenv("SV_IMAGE_URL")
+        if os.getenv("SV_IMAGE_MODEL"):
+            o.image_model = os.getenv("SV_IMAGE_MODEL")
+        if os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY"):
+            o.llm_key = os.getenv("NVIDIA_API_KEY") or os.getenv("SV_LLM_KEY")
         story = read_story(p.wd)
         if not story or i >= len(story.scenes):
             raise Err(404, "no such scene")
