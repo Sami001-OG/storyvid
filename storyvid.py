@@ -972,7 +972,7 @@ def main() -> int:
     ap.add_argument("--llm-url", help="OpenAI-compatible LLM endpoint URL")
     ap.add_argument("--llm-model", help="story model name")
     ap.add_argument("--llm-key", help="story LLM API key")
-    ap.add_argument("--image-provider", choices=["gemini", "pollinations", "openai"], default="gemini")
+    ap.add_argument("--image-provider", choices=["gemini", "pollinations", "openai", "custom"], default="gemini")
     ap.add_argument("--image-model", help="image model name (e.g. gemini-2.5-flash-image, flux, dall-e-3)")
     ap.add_argument("--image-key", help="image generation API key")
     ap.add_argument("--image-url", help="custom image generation endpoint URL")

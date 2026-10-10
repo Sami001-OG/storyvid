@@ -1,343 +1,355 @@
-# STORYVID
+# STORYVID 🎬
 
-Turn one prompt into a finished narrated video made of still images.
+Turn one prompt into a complete, narrated video made of consistent AI-generated visuals, synchronized voice narration, dynamic motion, and timed captions.
 
 ```
-prompt ─▶ story ─▶ scenes ─▶ images ─▶ local voice ─▶ sync ─▶ render ─▶ final.mp4
-         (NIM)     (NIM)    (Gemini)    (on-device)   (FFmpeg)  (FFmpeg)
+prompt ──▶ story ──▶ scene split ──▶ images ──▶ local voice ──▶ sync & motion ──▶ final.mp4
+          (LLM)         (LLM)       (GenAI)       (TTS)           (FFmpeg)        (FFmpeg)
 ```
 
-| Stage | Where it runs | Engine |
+| Stage | Where it runs | Supported Engines & Providers |
 |---|---|---|
-| Story + scene split | cloud | NVIDIA NIM (any OpenAI-compatible model) |
-| Images (one per scene) | cloud | Gemini image model, the **only** Gemini usage |
-| Voice (TTS) | **local** | Chatterbox, Kokoro, Piper or espeak-ng |
-| Sync, motion, captions, render | local | FFmpeg |
+| **Story & Scene Split** | Cloud or Local | NVIDIA NIM, OpenAI, Groq, OpenRouter, Ollama/Local, Custom AI endpoint |
+| **Image Generation** | Cloud or Local | Google Gemini, Pollinations AI (100% Free), OpenAI (DALL-E), Custom AI endpoint |
+| **Voice (TTS)** | **Local** | Kokoro (default), Chatterbox (voice clone), Piper, espeak-ng |
+| **Sync, Motion, Captions** | Local | FFmpeg (Ken Burns zoom/pan, audio-driven duration, SRT/VTT) |
 
-There are two ways to run it: a **CLI** (`storyvid.py`) and an **interactive web UI** (`storyvid_web.py` + `ui.html`). Both drive the same pipeline code and share the same project folders.
-
----
-
-## Contents
-
-1. [Quick start](#quick-start)
-2. [Requirements](#requirements)
-3. [How the pipeline works](#how-the-pipeline-works)
-4. [Voice engines](#voice-engines)
-5. [Output layout and caching](#output-layout-and-caching)
-6. [CLI reference](#cli-reference)
-7. [Web UI](#web-ui)
-8. [Configuration (environment variables)](#configuration-environment-variables)
-9. [Error handling](#error-handling)
-10. [Security notes](#security-notes)
-11. [Code map](#code-map)
-12. [Known limits](#known-limits)
-13. [Troubleshooting](#troubleshooting)
+There are two ways to use StoryVid: an interactive **Web UI** (`storyvid_web.py`) with live SSE progress, in-page scene editor, and video player, or the **CLI** (`storyvid.py`). Both share identical project storage and caching.
 
 ---
 
-## Quick start
+## Table of Contents
+
+1. [Quick Start](#quick-start)
+2. [Prerequisites & Requirements](#prerequisites--requirements)
+3. [Configuring AI Providers & Keys](#configuring-ai-providers--keys)
+   - [Option A: Web UI Settings (Recommended)](#option-a-web-ui-settings-recommended)
+   - [Option B: .env File](#option-b-env-file)
+   - [Option C: Environment Variables](#option-c-environment-variables)
+   - [Free / No-Key Mode](#free--no-key-mode)
+4. [Supported Story LLM Providers](#supported-story-llm-providers)
+5. [Supported Image Generation Providers](#supported-image-generation-providers)
+6. [Voice Engines (Local TTS)](#voice-engines-local-tts)
+7. [Web UI Guide](#web-ui-guide)
+8. [CLI Reference](#cli-reference)
+9. [Configuration Reference](#configuration-reference)
+10. [Output Structure & Caching](#output-structure--caching)
+11. [Troubleshooting](#troubleshooting)
+
+---
+
+## Quick Start
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/Sami001-OG/storyvid.git
 cd storyvid
-# Use Python 3.10–3.12 (Python 3.12 or 3.11 recommended)
-python -m venv .venv
-source .venv/bin/activate              # Linux/macOS
-# or: .venv\Scripts\activate           # Windows
-
-pip install -r requirements.txt        # and install ffmpeg (see below)
-
-export NVIDIA_API_KEY=nvapi-...        # story + scene split
-export GEMINI_API_KEY=...              # images only
-
-# web UI
-python storyvid_web.py                 # open http://127.0.0.1:8765
-
-# or CLI
-python storyvid.py "a lighthouse keeper who befriends a storm" -n 8
 ```
 
-Result: `out/<slug>-<hash>/final.mp4`.
+### 2. Set up Python environment
 
-## Requirements
+> ⚠️ **Important:** StoryVid requires **Python 3.10 to 3.12** (Python 3.12 recommended). `kokoro-onnx` depends on `onnxruntime`, which does not yet provide pre-built wheels for Python 3.13+ or pre-release builds like Python 3.15.
 
-- **Python 3.10–3.12** (`kokoro-onnx` depends on `onnxruntime`, which requires Python <= 3.12; pre-release versions such as Python 3.15 are not supported)
-- **FFmpeg** on `PATH` (`apt install ffmpeg`, `brew install ffmpeg`, `pkg install ffmpeg`). For `--burn-subs` it must be built with libass (most builds are).
-- **Python packages** (`requirements.txt`): `openai` (talks to NIM), `google-genai` (images), `rich` (terminal UI), `numpy`, `kokoro-onnx` (default local TTS).
-- **Optional:** `chatterbox-tts` for the most expressive voice (Python 3.11, GPU strongly recommended), `piper-tts`, or `espeak-ng`.
-- **API keys:** an NVIDIA NIM key from build.nvidia.com and a Gemini API key.
+**Windows (PowerShell / Command Prompt):**
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\activate
+```
 
-The web server uses only the Python standard library, so it adds no extra dependencies.
+**macOS / Linux:**
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+Make sure **FFmpeg** is installed and on your system `PATH`:
+- **Windows:** `winget install Gyan.FFmpeg` or `choco install ffmpeg`
+- **macOS:** `brew install ffmpeg`
+- **Ubuntu/Debian:** `sudo apt update && sudo apt install ffmpeg`
+
+### 4. Start the Web UI
+
+```bash
+python storyvid_web.py
+```
+
+Open your browser to:
+👉 **[http://127.0.0.1:8765](http://127.0.0.1:8765)**
+
+*(Or run via CLI: `python storyvid.py "a cyber detective in neo-tokyo" -n 8`)*
 
 ---
 
-## How the pipeline works
+## Prerequisites & Requirements
 
-Everything lives in `storyvid.py`. `run_pipeline()` runs five steps in order, and every step is cached on disk so a re-run only does the missing work.
-
-### 1. Story and scene split (NVIDIA NIM)
-
-Two separate model calls, because one call that must invent a story *and* cut it into scenes produces worse results than two focused ones.
-
-**Stage 1, the "bible".** The model returns JSON with `title`, `visual_style`, `characters`, `story`.
-- `story` is a complete tale of roughly `scenes × 30` words in the chosen language.
-- `visual_style` is one line defining a single art style used for every frame.
-- `characters` is a visual description of each recurring character (age, clothes, colours, features).
-
-**Stage 2, the breakdown.** The model receives the bible and splits the story into exactly N consecutive scenes. Each scene has:
-- `narration`: 15 to 45 words, in order, no gaps or repeats, polished for reading aloud.
-- `image_prompt`: one self-contained still frame in English (subject, action, setting, camera angle, lighting, mood), re-describing every visible character.
-
-**Narration styles** (`--narration`):
-- `viral` (default): hook in the first sentence (shocking claim, question or mystery), short punchy sentences, rising tension, a twist, a satisfying last line, natural spoken rhythm.
-- `calm`: warm, flowing, cinematic.
-
-Both styles append **TTS rules** to the prompt: spell out numbers and symbols, no abbreviations, no parentheses, no em dashes, no emojis, no markdown. Text-to-speech engines stumble on those, so the story model is told to avoid them.
-
-**Robust parsing.** Models often wrap JSON in markdown fences or add chatter. `extract_json()` strips fences and takes everything from the first `{` to the last `}`, then validates the result with Pydantic. Invalid output triggers a retry (up to 4 attempts).
-
-The result is saved as `story.json`. **If `story.json` already exists it is reused**, so you can hand-edit it and re-run.
-
-### 2. Images (Gemini)
-
-One image per scene. The prompt sent to Gemini is assembled by `frame_prompt()`:
-
-```
-<visual_style>
-Characters (identical appearance in every frame): <characters>
-Scene: <image_prompt>
-Aspect ratio <16:9|9:16>. No text, captions, letters, logos or watermarks.
-```
-
-Repeating the shared style and character block in every prompt is what keeps frames visually consistent. The aspect ratio is passed through Gemini's image config where the SDK supports it, and FFmpeg crops to exact size later regardless.
-
-- Scenes are generated **in parallel** (`--workers`, default 3).
-- Already-generated scenes are skipped (cache).
-- On a transient error the call is retried with backoff. If a scene still fails (for example a safety block), a **black placeholder** is written so the video can still render, and the failure is logged. Auth errors abort immediately.
-- The Gemini client is only created if at least one image is actually missing, so a fully cached project needs no Gemini key.
-
-### 3. Voice (local TTS)
-
-One WAV per scene, generated on your machine. See [Voice engines](#voice-engines).
-
-- Voice generation runs **sequentially**, because local engines are not safely re-entrant and use the GPU/CPU heavily. A lock inside each engine also protects against concurrent web jobs.
-- Each engine's raw output is normalised by FFmpeg to **mono 16-bit PCM WAV**. That makes duration maths and muxing uniform across engines.
-- Chatterbox has no native speed control, so the speed setting is applied during normalisation with FFmpeg's `atempo` filter.
-
-### 4. Sync
-
-The key idea: **audio duration drives scene duration.**
-
-For every scene, the real length of its WAV is measured (`wav_dur`). That scene's image is shown for `audio length + 0.5 s` (`PAD`). The half second of silence after each line gives the video breathing room between scenes. There is no guessing and no drift, because each clip is built from exactly the audio it contains.
-
-### 5. Render (FFmpeg)
-
-**Per-scene clip** (`build_clip`):
-- The image is scaled and centre-cropped to fill the target size (1280×720 by default, 1920×1080 with `--hd`, swapped for 9:16).
-- **Ken Burns motion** (default): the image is rendered at 2× size and `zoompan` slowly zooms 20%. Even-numbered scenes zoom in and odd-numbered scenes zoom out, so consecutive shots feel different. Rendering at 2× avoids the jitter `zoompan` produces on small sources. `--no-kenburns` uses a plain static frame.
-- Audio is padded with silence (`apad`), resampled to 48 kHz and made stereo, then encoded as AAC. Video is H.264 (`libx264`, CRF 20, 30 fps, `yuv420p`, `faststart`).
-- Clips are built in parallel across CPU cores.
-
-**Join:** all clips share identical codec parameters, so FFmpeg's concat demuxer joins them with **stream copy** (`-c copy`), with no re-encode and no quality loss.
-
-**Captions:** `subs.srt` and `subs.vtt` are always written. Narration is split into sentences, then into chunks of at most 8 words (balanced within a sentence). Each chunk's time slice is proportional to its character count within the scene's audio duration. These are **estimated timings, not forced alignment**, which is accurate enough for short scenes. With `--burn-subs` the SRT is hard-coded into the picture through FFmpeg's `subtitles` filter (needs libass; if missing, the burn step is skipped with a warning and the sidecar files are still written).
-
-The final file is `final.mp4`.
+- **Python 3.10 – 3.12**: Verified with Python 3.12 on Windows, macOS, and Linux.
+- **FFmpeg**: Required for audio normalization, duration measuring, Ken Burns motion video rendering, subtitle burning, and stream concatenation.
+- **Python Packages**: `openai`, `google-genai`, `kokoro-onnx`, `numpy`, `rich`, `pydantic>=2.0`.
+- **Hardware**: Runs comfortably on CPU using Kokoro TTS. A dedicated GPU (NVIDIA CUDA or Apple Silicon MPS) is optional and enables Chatterbox voice cloning.
 
 ---
 
-## Voice engines
+## Configuring AI Providers & Keys
 
-Select with `--tts` (CLI) or the **Voice engine** dropdown (web). `auto` picks the best available:
+StoryVid provides flexible AI integration for both Story generation and Image generation.
 
-1. **Chatterbox** if installed **and** a GPU (CUDA or Apple MPS) is present.
-2. **Kokoro** if installed.
-3. **Piper** if installed and `SV_PIPER_MODEL` is set.
-4. **espeak-ng** as a last resort.
+### Option A: Web UI Settings (Recommended)
 
-| Engine | Quality | Needs | Notes |
+1. Start the server: `python storyvid_web.py`
+2. Open **[http://127.0.0.1:8765](http://127.0.0.1:8765)**
+3. Under **NEW JOB**, expand **⚙ AI INTEGRATION & PRESETS**
+4. Select your preferred **Story LLM** and **Image Generation** providers
+5. Enter your API key(s) or custom endpoint URLs
+6. Click **💾 Save as defaults** — your configuration is saved automatically to `.env` and loaded on future launches!
+
+### Option B: .env File
+
+Create a `.env` file in the project root:
+
+```ini
+# --- Story LLM ---
+SV_LLM_URL=https://integrate.api.nvidia.com/v1
+SV_LLM_MODEL=meta/llama-3.2-11b-vision-instruct
+NVIDIA_API_KEY=nvapi-...
+
+# --- Image Generation ---
+SV_IMAGE_PROVIDER=gemini
+SV_IMAGE_MODEL=gemini-2.5-flash-image
+GEMINI_API_KEY=AIzaSy...
+
+# Or use Pollinations AI (Free, no key required):
+# SV_IMAGE_PROVIDER=pollinations
+```
+
+*(Note: `.env` is git-ignored for your security).*
+
+### Option C: Environment Variables
+
+**Windows (PowerShell):**
+```powershell
+$env:NVIDIA_API_KEY="nvapi-..."
+$env:GEMINI_API_KEY="AIzaSy..."
+python storyvid_web.py
+```
+
+**macOS / Linux:**
+```bash
+export NVIDIA_API_KEY="nvapi-..."
+export GEMINI_API_KEY="AIzaSy..."
+python storyvid_web.py
+```
+
+### Free / No-Key Mode
+
+You can run StoryVid without paid image generation keys:
+1. Set **Image Provider** to `pollinations` (Pollinations AI generates images for free via Flux without requiring an API key or account).
+2. For Story generation, you can use:
+   - **Local LLMs via Ollama**: `http://localhost:11434/v1` with model `llama3.2`
+   - **Groq Free Tier**: Fast inference with free developer credits
+   - **NVIDIA NIM Free Trial**: 1,000 free inference credits on [build.nvidia.com](https://build.nvidia.com)
+
+---
+
+## Supported Story LLM Providers
+
+The Story LLM invents the visual style, characters, and breaks the narrative down into an exact number of scenes. StoryVid works with any OpenAI-compatible API:
+
+| Provider | Preset | Default Model | Base URL |
 |---|---|---|---|
-| `chatterbox` | Most expressive, attention-grabbing | `pip install chatterbox-tts`, GPU | **Expressiveness** (`--exaggeration`, 0.25–1.5) controls dramatic delivery. `--ref-audio clip.wav` clones a voice from a 5–15 s sample. At high expressiveness the CFG weight is lowered automatically to keep pacing natural. |
-| `kokoro` | Very good, fast, runs on CPU | `pip install kokoro-onnx` | Voices such as `af_heart`, `am_adam`, `bf_emma`, `bm_george`. The ~300 MB model files download automatically on first use to `~/.cache/storyvid`. `--tts-lang` sets the phonemiser language (`en-us`, `en-gb`, ...). |
-| `piper` | Good, lightweight | `piper-tts` plus a voice `.onnx` | Pass the model path as `--voice` or set `SV_PIPER_MODEL`. |
-| `espeak` | Robotic, zero setup | `espeak-ng` | Fallback and quick testing. |
-
-Engines are loaded once per process and cached, so the web UI does not reload multi-gigabyte weights for every scene.
-
----
-
-## Output layout and caching
-
-Each project is one folder (default `out/<prompt-slug>-<hash>/`; the web UI adds a timestamp):
-
-```
-out/my-story-ab12cd/
-├── project.json      all options used (shared by CLI and web UI)
-├── story.json        title, style, characters, scenes (editable)
-├── images/           scene_00.png ...   (Gemini output)
-├── audio/            scene_00.wav ...   (local TTS, mono PCM16)
-├── clips/            scene_00.mp4 ...   (per-scene video, rebuilt every render)
-├── subs.srt          captions
-├── subs.vtt          captions for the browser player
-└── final.mp4         the result
-```
-
-**Resume and cache rules**
-- CLI: the folder name is a hash of prompt + scene count + aspect + language, so re-running the **same command** resumes automatically. Change any of those and you get a new project.
-- Existing `story.json`, images and WAVs are never regenerated.
-- To redo something, delete it (for example `images/scene_03.png`) or pass `--force` (clears images, audio and clips).
-- `--story path.json` supplies a story file instead of generating one.
-- Clips are always rebuilt on render (cheap), so edits are never stale.
+| **NVIDIA NIM** (Default) | `nvidia` | `meta/llama-3.2-11b-vision-instruct` | `https://integrate.api.nvidia.com/v1` |
+| **OpenAI** | `openai` | `gpt-4o-mini` | `https://api.openai.com/v1` |
+| **Groq** | `groq` | `llama-3.3-70b-versatile` | `https://api.groq.com/openai/v1` |
+| **OpenRouter** | `openrouter` | `meta-llama/llama-3.3-70b-instruct` | `https://openrouter.ai/api/v1` |
+| **Local (Ollama / vLLM)** | `local` | `llama3.2` | `http://localhost:11434/v1` |
+| **Custom AI Endpoint** | `custom` | *Your choice* | *Any custom OpenAI-compatible URL* |
 
 ---
 
-## CLI reference
+## Supported Image Generation Providers
 
+| Provider | Key Required? | Description & Models |
+|---|---|---|
+| **Google Gemini** | Yes (`GEMINI_API_KEY`) | High-fidelity image generation. Default model: `gemini-2.5-flash-image` (or `imagen-3.0-generate-002`). |
+| **Pollinations AI** | **No (100% Free)** | Fast, free image generation using Flux. No account or key required. Ideal for quick generation and testing. |
+| **OpenAI DALL-E** | Yes (`OPENAI_API_KEY`) | Official OpenAI DALL-E image generation (`dall-e-3` or `dall-e-2`). |
+| **Custom AI Endpoint** | Optional | Any OpenAI-compatible `/v1/images/generations` server (e.g. Local Stable Diffusion, Fooocus, vLLM, SwarmUI) returning Base64 (`b64_json`) or image URLs. |
+
+---
+
+## Voice Engines (Local TTS)
+
+Local speech synthesis ensures all audio is generated directly on your machine with zero cloud TTS fees.
+
+| Engine | Quality | Setup | Features |
+|---|---|---|---|
+| **Kokoro** (Default) | Very high, natural rhythm | Included in `requirements.txt` | Fast on CPU (~300MB weights auto-download to cache on first run). 19+ voices: `af_heart`, `am_adam`, `bf_emma`, `bm_george`, etc. |
+| **Chatterbox** | Expressive, dramatic | `pip install chatterbox-tts` (GPU recommended) | Expressiveness slider (`--exaggeration` 0.25–1.5). Voice cloning from a 5–15s WAV sample (`--ref-audio`). |
+| **Piper** | Fast, lightweight | `piper-tts` + `.onnx` voice file | Set path with `--voice` or `SV_PIPER_MODEL`. |
+| **espeak-ng** | Robotic / testing | `espeak-ng` system package | Instant zero-setup fallback. |
+
+Audition any voice directly in the Web UI using the **"Test voice"** button before generating a video.
+
+---
+
+## Web UI Guide
+
+The Web UI (`storyvid_web.py` + `ui.html`) is a responsive, single-page terminal-styled dashboard:
+
+```bash
+python storyvid_web.py --port 8765
 ```
+
+### Key Features
+
+1. **Job Creation & Parameter Tuning:**
+   - Prompt, Scene count (1–24), Aspect ratio (`16:9` widescreen or `9:16` vertical reels/shorts).
+   - Narration style (`viral` with punchy hooks or `calm` cinematic).
+   - Voice engine selection, voice picker, speech speed multiplier (0.6x–1.6x).
+   - Video settings: 1080p HD, Ken Burns motion zoom/pan, Hardcoded subtitle burning.
+
+2. **Interactive Scene Editor:**
+   - View every generated scene card with its image and audio as soon as they finish rendering.
+   - **Edit narration text**: re-generates only that scene's audio (`↻ voice`).
+   - **Edit image prompt**: re-generates only that scene's image (`↻ image`).
+   - Re-roll individual assets without regenerating the rest of the project.
+
+3. **Re-rendering & Dirty State Detection:**
+   - Whenever an asset is modified, the **RE-RENDER** button activates.
+   - Re-rendering takes only seconds because clips and concat demuxers reuse existing media with stream copying (`-c copy`).
+
+4. **In-Browser Video Player:**
+   - Native HTML5 video player with HTTP Range requests (smooth seeking).
+   - Interactive playback: clicking `▶ play` on any scene card jumps the video directly to that scene's timestamp.
+   - Active scene card highlights in sync with the video.
+   - Subtitle toggle powered by `subs.vtt`.
+
+5. **Project Management:**
+   - Resume interrupted jobs with one click.
+   - Browse and load past projects.
+   - Delete unwanted projects.
+
+---
+
+## CLI Reference
+
+```bash
 python storyvid.py "<prompt>" [options]
 ```
 
-| Option | Default | Meaning |
+### Basic Options
+
+| Option | Default | Description |
 |---|---|---|
-| `-n`, `--scenes` | 8 | Number of scenes (1–24) |
-| `--aspect` | 16:9 | `16:9` or `9:16` (shorts/reels) |
-| `--hd` | off | 1080p instead of 720p |
-| `--lang` | English | Narration language (for the story model) |
-| `--narration` | viral | `viral` or `calm` |
-| `--tts` | auto | `auto`, `chatterbox`, `kokoro`, `piper`, `espeak` |
-| `--voice` | engine default | Kokoro voice, Piper `.onnx` path, or espeak voice |
-| `--tts-lang` | en-us | Phonemiser language (Kokoro/espeak) |
-| `--speed` | 1.0 | Speech speed multiplier (0.6–1.6) |
-| `--exaggeration` | 0.6 | Chatterbox expressiveness |
-| `--ref-audio` | none | Chatterbox voice-clone reference clip |
-| `--workers` | 3 | Parallel Gemini image calls (lower if rate-limited) |
-| `--no-kenburns` | off | Disable zoom/pan |
-| `--burn-subs` | off | Burn captions into the video |
-| `--workdir` | auto | Output folder |
-| `--story` | none | Use an existing `story.json` |
-| `--force` | off | Discard cached images/audio/clips |
+| `-n`, `--scenes` | `8` | Number of scenes to generate (1–24, exact count guaranteed) |
+| `--aspect` | `16:9` | Aspect ratio: `16:9` (widescreen) or `9:16` (shorts/TikTok) |
+| `--hd` | `off` | 1080p resolution instead of 720p |
+| `--lang` | `English` | Language for story generation and narration |
+| `--narration` | `viral` | Narration tone: `viral` (hook-heavy) or `calm` (flowing) |
+| `--tts` | `auto` | TTS backend: `auto`, `kokoro`, `chatterbox`, `piper`, `espeak` |
+| `--voice` | default | Voice identifier (e.g. `af_heart` for Kokoro) |
+| `--speed` | `1.0` | Speech speed multiplier (0.6 to 1.6) |
+| `--no-kenburns` | `off` | Disable subtle dynamic zoom and pan motion |
+| `--burn-subs` | `off` | Burn timed subtitles directly into the video frames |
+| `--workers` | `3` | Parallel workers for image generation |
+| `--workdir` | auto | Custom project directory path |
+| `--force` | `off` | Clear cached images/audio/clips and regenerate |
 
-Terminal progress is drawn by `rich`: one bar per stage (STORY, IMAGES, VOICE, CLIPS, RENDER).
+### AI Provider CLI Flags
 
----
+| Flag | Default / Env | Description |
+|---|---|---|
+| `--llm-url` | `SV_LLM_URL` | Base URL for OpenAI-compatible LLM endpoint |
+| `--llm-model` | `SV_LLM_MODEL` | Model name for story writing |
+| `--llm-key` | `NVIDIA_API_KEY` / `SV_LLM_KEY` | API key for Story LLM |
+| `--image-provider` | `gemini` | `gemini`, `pollinations`, `openai`, or `custom` |
+| `--image-model` | `SV_IMAGE_MODEL` | Image model name |
+| `--image-key` | `GEMINI_API_KEY` / `SV_IMAGE_KEY` | Image provider API key |
+| `--image-url` | `SV_IMAGE_URL` | Custom OpenAI-compatible image endpoint URL |
 
-## Web UI
+### CLI Examples
 
+**Generate with default NIM + Gemini:**
 ```bash
-python storyvid_web.py [--host 127.0.0.1] [--port 8765]
+python storyvid.py "The secret library beneath the ocean" -n 6
 ```
 
-A single-page, terminal-styled interface (`ui.html`) served by a stdlib HTTP server (`storyvid_web.py`). It works on phones.
+**Generate with Pollinations AI (Free, no image key needed):**
+```bash
+python storyvid.py "A cyberpunk samurai in Neo-Tokyo" --image-provider pollinations -n 8
+```
 
-### What you can do
+**Generate vertical 9:16 video for YouTube Shorts / TikTok with burned-in subtitles:**
+```bash
+python storyvid.py "Three bizarre historical facts that sound fake" --aspect 9:16 --burn-subs -n 6
+```
 
-- **Create a job:** prompt, scenes, aspect, narration style, language, voice engine, voice, speed, expressiveness, reference voice, 1080p, Ken Burns, burn subs.
-- **Test voice:** synthesises a sample line with the current voice settings so you can audition before committing.
-- **Watch it run:** live progress bars and a log stream. Scene images and audio appear as soon as each is ready.
-- **Edit any scene afterwards.** Change the narration (only that voice is regenerated) or the image prompt (only that image is regenerated). `↻ image` and `↻ voice` re-roll a scene without changing its text.
-- **Re-render:** edited projects highlight the RE-RENDER button. Rendering rebuilds the clips from the current assets.
-- **Player:** an in-page video player with captions from `subs.vtt`. `▶ play` on a scene card jumps the video to that scene, and the card for the currently playing scene lights up.
-- **Manage projects:** reopen past projects (shared with the CLI), resume a job that stopped part-way, delete a project.
+**Use a local Ollama model:**
+```bash
+python storyvid.py "A time traveler stuck in ancient Rome" --llm-url "http://localhost:11434/v1" --llm-model "llama3.2" --image-provider pollinations
+```
 
-### How it works
+---
 
-- The pipeline functions take a `Reporter` object. The CLI passes a `rich`-based reporter; the web server passes `WebReporter`, which turns progress into JSON events.
-- Each project keeps an in-memory event list. The browser connects with **Server-Sent Events** and receives them live; reconnecting resumes from the last event ID. Event types: `busy`, `stage`, `tick`, `finish`, `log`, `story`, `asset`, `video`, `done`, `error`.
-- Only **one job runs per project at a time**; a second action returns HTTP 409.
-- On `asset`/`story`/`video`/`done` events the page re-fetches project state and updates cards in place. Text boxes you are editing are not overwritten.
-- A project is "dirty" (needs re-render) when any asset or `story.json` is newer than `final.mp4`.
-- Videos are served with HTTP **Range** support so browsers can seek.
+## Configuration Reference
 
-### HTTP API
+Variables can be placed in `.env` or set in your environment:
 
-| Method | Path | Purpose |
+| Variable | Default | Description |
 |---|---|---|
-| GET | `/` | the UI |
-| GET | `/api/status` | key presence, available TTS engines, models |
-| GET | `/api/projects` | list projects |
-| POST | `/api/projects` | create and start a job (JSON options) |
-| GET | `/api/projects/<id>` | full state: story, scenes, asset URLs, video, dirty flag |
-| GET | `/api/projects/<id>/events` | SSE stream |
-| POST | `/api/projects/<id>/resume` | continue an incomplete project |
-| POST | `/api/projects/<id>/render` | re-render (`kenburns`, `burn_subs` optional) |
-| POST | `/api/projects/<id>/scenes/<i>` | edit a scene (`narration`, `image_prompt`, `regen: ["image","voice"]`) |
-| DELETE | `/api/projects/<id>` | delete a project |
-| POST | `/api/preview` | synthesise a voice sample (returns WAV) |
-| GET | `/files/<id>/<path>` | project files (Range supported) |
+| `SV_LLM_URL` | `https://integrate.api.nvidia.com/v1` | Story LLM endpoint URL |
+| `SV_LLM_MODEL` | `meta/llama-3.2-11b-vision-instruct` | Story LLM model name |
+| `NVIDIA_API_KEY` / `SV_LLM_KEY` | *empty* | API key for Story LLM |
+| `SV_IMAGE_PROVIDER` | `gemini` | Image provider: `gemini`, `pollinations`, `openai`, `custom` |
+| `SV_IMAGE_MODEL` | `gemini-2.5-flash-image` | Image generation model |
+| `GEMINI_API_KEY` / `SV_IMAGE_KEY` | *empty* | API key for image generation |
+| `SV_IMAGE_URL` | `https://api.openai.com/v1` | Endpoint URL for `openai` or `custom` image provider |
+| `SV_OUT` | `out` | Directory for output project folders |
+| `SV_CACHE` | `~/.cache/storyvid` | Directory for downloaded TTS model weights |
+| `SV_PIPER_MODEL` | *empty* | Path to default Piper `.onnx` voice model |
 
 ---
 
-## Configuration (environment variables)
+## Output Structure & Caching
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `NVIDIA_API_KEY` (or `SV_LLM_KEY`) | none | Key for the story model |
-| `SV_LLM_URL` | `https://integrate.api.nvidia.com/v1` | Any OpenAI-compatible endpoint |
-| `SV_LLM_MODEL` | `meta/llama-3.3-70b-instruct` | Story/scene model |
-| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | none | Key for image generation |
-| `SV_IMAGE_MODEL` | `gemini-2.5-flash-image` | Gemini image model |
-| `SV_OUT` | `out` | Projects folder |
-| `SV_CACHE` | `~/.cache/storyvid` | Downloaded model files (Kokoro) |
-| `SV_PIPER_MODEL` | none | Default Piper voice `.onnx` |
+Every generated video is stored in its own project directory inside `out/`:
 
-Keys are read only when needed: a fully cached project (story, images) needs neither key.
+```
+out/my-story-ab12cd/
+├── project.json      # Complete configuration options used
+├── story.json        # Generated story, style, characters, and scenes (editable)
+├── images/           # scene_00.png, scene_01.png, ...
+├── audio/            # scene_00.wav, scene_01.wav, ... (normalized PCM16)
+├── clips/            # scene_00.mp4, ... (per-scene video clips)
+├── subs.srt          # Timed subtitles (SubRip)
+├── subs.vtt          # Timed subtitles for Web HTML5 player
+└── final.mp4         # Final rendered video
+```
 
----
-
-## Error handling
-
-- **Retries with backoff** on every network call. Delays double up to 60 s, and if the provider sends a retry-after hint (rate limits) that value is used. Authentication and permission errors are **not** retried.
-- **Failed image** after retries becomes a black placeholder (logged) instead of killing the run.
-- **Malformed story JSON** is retried, then reported.
-- **Everything is resumable.** After any failure, re-run the same command or click **resume**; completed work is not repeated.
-- User-facing problems (missing key, missing FFmpeg, bad option, missing reference audio) raise a clear `PipelineError` message in the CLI and appear in the UI log.
-
----
-
-## Security notes
-
-- The web server binds to **localhost** by default and checks the `Host` header, which blocks DNS-rebinding attacks.
-- Every state-changing request must carry a custom `X-SV: 1` header, which a malicious web page cannot send cross-origin without a CORS preflight (the server never allows one). This stops other sites from triggering paid API calls through your local server.
-- File serving resolves the real path and refuses anything outside the project folder.
-- UI text from the model is inserted with `textContent`, never as HTML.
-- `--host 0.0.0.0` exposes the server with **no authentication**. Use it only on a network you trust.
-- API keys are read from environment variables; the UI never accepts or stores keys.
-- Never commit keys. `.env` and `out/` are in `.gitignore`.
-
----
-
-## Code map
-
-| File | Role |
-|---|---|
-| `storyvid.py` | The whole pipeline plus the CLI: options (`Opts`), story (`make_story`, `step_story`), images (`make_image`, `step_images`), voice (`TTS`, `step_voice`), subtitles (`build_cues`, `write_subs`), render (`build_clip`, `concat`, `step_render`), `run_pipeline`, reporters |
-| `storyvid_web.py` | Stdlib HTTP server: project registry, SSE events, job threads, scene editing, Range file serving, preview |
-| `ui.html` | The single-file web interface (HTML, CSS, vanilla JS) |
-| `requirements.txt` | Python dependencies |
-
----
-
-## Known limits
-
-- Caption timing is estimated from character counts, not aligned to the audio word by word.
-- Frames are independent generations, so character consistency relies on the repeated style/character prompt and is good but not perfect.
-- Chatterbox on CPU is slow, so `auto` avoids it without a GPU.
-- Model names (`gemini-2.5-flash-image`, `meta/llama-3.3-70b-instruct`) change over time; override them with the environment variables above if a provider renames or retires one.
-- Testing status: the full web flow, sync, render, captions, Range requests and scene editing were verified end to end with the story and image calls mocked and real local TTS (Kokoro and espeak) and real FFmpeg. The live NIM and Gemini calls and the Chatterbox integration were written against their documented APIs but not exercised live in the test environment.
+- **Smart Caching:** Existing `story.json`, images, and audio files are never re-downloaded or re-generated unless explicitly requested.
+- **Exact Scene Count Guarantee:** If an LLM returns fewer or more scenes than requested, StoryVid's boundary-aware alignment algorithm splits or merges scenes seamlessly to guarantee the exact frame count you asked for.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `ResolutionImpossible` / `onnxruntime` has no matching distribution | You are using an unsupported Python version (e.g. Python 3.15 alpha); use Python 3.11 or 3.12 |
-| `ffmpeg not found` | Install FFmpeg and make sure it is on `PATH` |
-| `NVIDIA_API_KEY is not set` / `GEMINI_API_KEY is not set` | Export the key in the shell that launches the app |
-| 429 / rate limit from Gemini | Lower `--workers` to 1 or 2; retries already honor the provider's delay |
-| A frame came out black | Gemini refused or failed that prompt; edit the scene's image prompt and click `↻ image` |
-| Kokoro download fails | Download `kokoro-v1.0.onnx` and `voices-v1.0.bin` manually into `~/.cache/storyvid` |
-| No audio engine found | `pip install kokoro-onnx` or install `espeak-ng` |
-| Captions not burned in | Your FFmpeg lacks libass; use the `.srt`/`.vtt` files or install a full FFmpeg build |
-| Video does not seek in the browser | Make sure you are using `storyvid_web.py`, which supports Range requests |
+| Problem | Cause | Solution |
+|---|---|---|
+| `ResolutionImpossible` / `onnxruntime` has no matching distribution | Using Python 3.13, 3.14, or 3.15 | Use **Python 3.12** or 3.11 (`py -3.12 -m venv .venv`). `onnxruntime` does not yet publish binary wheels for Python 3.13+. |
+| `ffmpeg: command not found` | FFmpeg is not installed or not in PATH | Install FFmpeg (`winget install Gyan.FFmpeg` on Windows, `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux) and restart your terminal. |
+| `429 RESOURCE_EXHAUSTED` from Gemini | Free Gemini tier image quotas exhausted | Switch image provider to **Pollinations AI** (free, no quota) in Web UI or `.env`, or enable Pay-As-You-Go on Google Cloud. |
+| Model 410 Gone (`meta/llama-3.3-70b-instruct`) | Old NVIDIA model retired | Update to `meta/llama-3.2-11b-vision-instruct` (set automatically in current version). |
+| Black placeholder frame generated | Safety filter or temporary provider timeout | Click `↻ image` on that scene card in the Web UI to re-roll with a slightly modified prompt. |
+| Captions not burned into video (`--burn-subs`) | FFmpeg build lacks `libass` | Use a full FFmpeg build (e.g. Gyan.FFmpeg full on Windows). The `.srt` and `.vtt` caption files are still produced. |
+
+---
+
+## License
+
+MIT License. Feel free to use, modify, and build upon StoryVid!
