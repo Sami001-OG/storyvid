@@ -334,6 +334,46 @@ def llm_json(client, system: str, user: str, cls, label: str, rep: Reporter, tem
     return retry(call, label, rep, tries=4)
 
 
+def adjust_scenes(scenes: list[Scene], n: int, style: str, chars: str) -> list[Scene]:
+    """Ensure the scene list has exactly n scenes, expanding or trimming as needed."""
+    if not scenes:
+        raise ValueError("model returned zero scenes")
+    if len(scenes) == n:
+        return scenes
+
+    if len(scenes) > n:
+        trimmed = list(scenes[:n - 1])
+        tail = scenes[n - 1:]
+        merged_narration = " ".join(s.narration.strip() for s in tail if s.narration.strip())
+        final_prompt = tail[-1].image_prompt
+        trimmed.append(Scene(narration=merged_narration, image_prompt=final_prompt))
+        return trimmed
+
+    current = list(scenes)
+    while len(current) < n:
+        best_idx = max(range(len(current)), key=lambda i: len(current[i].narration.split()))
+        target = current[best_idx]
+        words = target.narration.split()
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", target.narration) if s.strip()]
+        if len(sentences) >= 2:
+            mid = len(sentences) // 2
+            part1 = " ".join(sentences[:mid])
+            part2 = " ".join(sentences[mid:])
+        elif len(words) >= 4:
+            mid = len(words) // 2
+            part1 = " ".join(words[:mid])
+            part2 = " ".join(words[mid:])
+        else:
+            part1 = target.narration
+            part2 = target.narration
+
+        p1 = target.image_prompt
+        p2 = f"{style}. Characters: {chars}. Scene continues: {target.image_prompt}. Alternative dynamic angle."
+        current[best_idx] = Scene(narration=part1, image_prompt=p1)
+        current.insert(best_idx + 1, Scene(narration=part2, image_prompt=p2))
+    return current
+
+
 def make_story(client, o: Opts, rep: Reporter) -> Story:
     n, lang, style = o.scenes, o.lang, NARRATION[o.narration]
     bible = llm_json(
@@ -349,7 +389,8 @@ def make_story(client, o: Opts, rep: Reporter) -> Story:
 
     bd = llm_json(
         client,
-        f"You split stories into exactly {n} consecutive scenes for a video of still images. "
+        f"You split stories into EXACTLY {n} consecutive scenes for a video of still images. "
+        f'CRITICAL: The output JSON "scenes" array MUST contain EXACTLY {n} items, no more and no less. '
         'Respond with ONLY a JSON object: {"scenes":[{"narration":"...","image_prompt":"..."}]}. '
         f"narration: that scene's portion of the story in {lang}, 15-45 words, in order, no gaps or "
         f"repeats across scenes, polished for reading aloud. {style} {TTS_RULES} "
@@ -360,10 +401,12 @@ def make_story(client, o: Opts, rep: Reporter) -> Story:
         Breakdown, "scenes", rep, temperature=0.4)
     if not bd.scenes:
         raise ValueError("model returned zero scenes")
-    if len(bd.scenes) != n:
-        rep.log(f"model returned {len(bd.scenes)} scenes (asked {n}); using as-is", "warn")
+    scenes = bd.scenes
+    if len(scenes) != n:
+        rep.log(f"model returned {len(scenes)} scenes (asked {n}); adjusting to exactly {n}", "info")
+        scenes = adjust_scenes(scenes, n, bible.visual_style, bible.characters)
     return Story(title=bible.title, visual_style=bible.visual_style,
-                 characters=bible.characters, scenes=bd.scenes)
+                 characters=bible.characters, scenes=scenes)
 
 
 def step_story(o: Opts, wd: Path, rep: Reporter, story_file: str | None = None) -> Story:
