@@ -1,0 +1,6 @@
+openai>=1.0
+google-genai>=1.0.0
+rich>=13.0
+numpy
+kokoro-onnx            # fast local TTS (default)
+# chatterbox-tts       # optional: most expressive local TTS (python 3.11, GPU recommended)

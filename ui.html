@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>STORYVID</title>
+<style>
+:root{--bg:#050806;--panel:#09110b;--line:#14532a;--fg:#39ff7a;--dim:#22a653;--mut:#5b8668;--amber:#ffb000;--red:#ff5252;--cyan:#4df0ff}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;color:var(--fg);font:14px/1.5 ui-monospace,"JetBrains Mono","Fira Code",Menlo,Consolas,monospace;min-height:100vh}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:49;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55))}
+a{color:var(--cyan)}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:18px;letter-spacing:.12em;text-shadow:0 0 8px rgba(57,255,122,.6)}
+header h1 i{font-style:normal;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.chip{border:1px solid var(--line);padding:1px 8px;font-size:12px;color:var(--mut)}
+.chip.ok{color:var(--fg);border-color:var(--dim)}
+.chip.bad{color:var(--red);border-color:var(--red)}
+.wrap{display:grid;grid-template-columns:350px minmax(0,1fr);gap:16px;padding:16px 18px;max-width:1600px;margin:0 auto}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}body.open .side{order:2}}
+.box{border:1px solid var(--line);background:var(--panel);margin-bottom:16px;position:relative}
+.box>h2{margin:0;padding:3px 10px;font-size:12px;letter-spacing:.2em;background:var(--line);color:#c8ffd9;display:flex;gap:10px;align-items:center}
+.box>h2 .sp{flex:1}
+.pad{padding:12px}
+label{display:block;margin:10px 0 3px;color:var(--dim);font-size:11px;letter-spacing:.14em}
+label b{color:var(--fg);font-weight:400}
+input,select,textarea{width:100%;background:#000;color:var(--fg);border:1px solid var(--line);padding:6px 8px;font:inherit;border-radius:0}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--fg);box-shadow:0 0 8px rgba(57,255,122,.35)}
+input[type=range]{padding:0;accent-color:var(--fg);height:22px}
+input[type=checkbox]{width:auto;accent-color:var(--fg)}
+textarea{resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chk{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px}
+.chk label{margin:0;display:flex;gap:6px;align-items:center;color:var(--fg);letter-spacing:0;font-size:13px}
+.btn{background:transparent;color:var(--fg);border:1px solid var(--fg);padding:6px 12px;font:inherit;text-transform:uppercase;letter-spacing:.1em;cursor:pointer;font-size:12px}
+.btn:hover:not(:disabled){background:var(--fg);color:#000}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.primary{width:100%;margin-top:14px;padding:10px;font-size:14px}
+.btn.warn{color:var(--amber);border-color:var(--amber)}.btn.warn:hover:not(:disabled){background:var(--amber);color:#000}
+.btn.danger{color:var(--red);border-color:var(--red)}.btn.danger:hover:not(:disabled){background:var(--red);color:#000}
+.btn.sm{padding:2px 8px;font-size:11px}
+.pulse{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 12px var(--amber)}}
+#plist .it{display:block;padding:8px 12px;border-bottom:1px solid #0f2c18;text-decoration:none;color:var(--fg);cursor:pointer}
+#plist .it:hover,#plist .it.sel{background:#0d2615}
+#plist .it small{display:block;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#plist .none{padding:12px;color:var(--mut)}
+.welcome pre{margin:0;color:var(--dim);overflow:auto}
+.vhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.vhead .t{font-size:20px;text-shadow:0 0 8px rgba(57,255,122,.45);margin-right:auto}
+.meta{color:var(--mut);font-size:12px;margin-top:4px}
+.prompt{color:var(--dim);margin-top:4px;white-space:pre-wrap}
+.back{display:none;color:var(--cyan);margin-bottom:8px;cursor:pointer}
+@media(max-width:900px){.back{display:inline-block}}
+.stage{display:grid;grid-template-columns:70px 1fr 56px;gap:8px;align-items:center;margin:3px 0;font-size:12px}
+.bar{height:10px;border:1px solid var(--line);background:#06100a}
+.bar>i{display:block;height:100%;width:0;background:repeating-linear-gradient(90deg,var(--fg) 0 6px,transparent 6px 8px);transition:width .25s}
+.stage.run .bar>i{box-shadow:0 0 8px var(--fg)}
+.cnt{text-align:right;color:var(--mut)}
+#log{height:170px;overflow:auto;background:#000;padding:8px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+#log div.warn{color:var(--amber)}#log div.err{color:var(--red)}#log div.ok{color:var(--fg)}#log div.sys{color:var(--cyan)}#log div.info{color:var(--mut)}
+.player video{width:100%;max-height:72vh;background:#000;display:block;outline:1px solid var(--line)}
+.player.portrait video{max-width:380px;margin:0 auto}
+.links{display:flex;gap:14px;margin-top:8px;font-size:12px}
+.empty{color:var(--mut);padding:20px;text-align:center}
+#scenes{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{border:1px solid var(--line);background:#07100a;padding:8px;display:flex;flex-direction:column;gap:6px}
+.card.now{border-color:var(--fg);box-shadow:0 0 14px rgba(57,255,122,.45)}
+.card.edited{border-color:var(--amber)}
+.ch{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--dim)}
+.ch .dur{margin-left:auto;color:var(--mut)}
+.shot{display:block;aspect-ratio:var(--ar,16/9);background:#000;position:relative;overflow:hidden;border:1px solid #0f2c18}
+.shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+.shot.loaded img{display:block}
+.shot .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--mut);font-size:12px;letter-spacing:.2em}
+.shot.loaded .ph{display:none}
+.card textarea{font-size:12px}
+.card details summary{cursor:pointer;color:var(--dim);font-size:11px;letter-spacing:.14em}
+.card audio{width:100%;height:30px;filter:hue-rotate(60deg) saturate(1.5)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+#toast{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#000;border:1px solid var(--amber);color:var(--amber);padding:8px 14px;z-index:60;display:none;max-width:90vw}
+</style>
+</head>
+<body>
+<header>
+  <h1>▌STORYVID<i>_</i></h1>
+  <span style="color:var(--mut);font-size:12px">nim story → gemini frames → local voice → video</span>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main class="wrap">
+  <aside class="side">
+    <section class="box">
+      <h2>NEW JOB</h2>
+      <form id="newForm" class="pad" autocomplete="off">
+        <label>PROMPT</label>
+        <textarea id="f_prompt" rows="4" placeholder="a lighthouse keeper who befriends a storm"></textarea>
+        <div class="row">
+          <div><label>SCENES</label><input id="f_scenes" type="number" min="1" max="24" value="8"></div>
+          <div><label>ASPECT</label><select id="f_aspect"><option>16:9</option><option>9:16</option></select></div>
+        </div>
+        <div class="row">
+          <div><label>NARRATION</label><select id="f_narration"><option value="viral">viral hook</option><option value="calm">calm cinematic</option></select></div>
+          <div><label>LANGUAGE</label><input id="f_lang" value="English"></div>
+        </div>
+        <label>VOICE ENGINE</label>
+        <select id="f_tts"></select>
+        <div class="row">
+          <div><label>VOICE</label><input id="f_voice" list="voices" placeholder="af_heart"><datalist id="voices"></datalist></div>
+          <div><label>PHONEME LANG</label><input id="f_ttslang" value="en-us"></div>
+        </div>
+        <label>SPEED <b id="v_speed">1.00</b></label>
+        <input id="f_speed" type="range" min="0.7" max="1.5" step="0.05" value="1">
+        <div id="cbox" hidden>
+          <label>EXPRESSIVENESS <b id="v_exag">0.60</b></label>
+          <input id="f_exag" type="range" min="0.25" max="1.5" step="0.05" value="0.6">
+          <label>REFERENCE VOICE (path on server, optional)</label>
+          <input id="f_ref" placeholder="/path/to/clip.wav">
+        </div>
+        <div class="chk">
+          <label><input type="checkbox" id="f_hd"> 1080p</label>
+          <label><input type="checkbox" id="f_kb" checked> ken burns</label>
+          <label><input type="checkbox" id="f_subs"> burn subs</label>
+        </div>
+        <div class="acts" style="margin-top:12px"><button type="button" class="btn sm" id="btnTest">▶ test voice</button></div>
+        <button class="btn primary" id="btnRun" type="submit">&gt; execute</button>
+      </form>
+    </section>
+    <section class="box">
+      <h2>PROJECTS</h2>
+      <div id="plist"></div>
+    </section>
+  </aside>
+
+  <section class="main">
+    <div id="welcome" class="box welcome">
+      <h2>READY</h2>
+      <div class="pad"><pre>
+ ┌──────────────────────────────────────────────┐
+ │ prompt ─▶ story ─▶ frames ─▶ voice ─▶ video  │
+ └──────────────────────────────────────────────┘
+ fill the form and hit EXECUTE, or open a project.
+ edit any scene afterwards: change the narration or
+ image prompt, regenerate just that scene, re-render.</pre></div>
+    </div>
+
+    <div id="view" hidden>
+      <div class="back" id="back">&lt; back to jobs</div>
+      <section class="box">
+        <h2>JOB <span class="sp"></span><span id="busyTag"></span></h2>
+        <div class="pad">
+          <div class="vhead">
+            <div class="t" id="pTitle">…</div>
+            <button class="btn sm" id="btnResume" hidden>resume</button>
+            <button class="btn sm" id="btnRender" hidden>re-render</button>
+            <button class="btn sm danger" id="btnDelete">delete</button>
+          </div>
+          <div class="meta" id="pMeta"></div>
+          <div class="prompt" id="pPrompt"></div>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>PIPELINE</h2>
+        <div class="pad"><div id="stages"></div></div>
+        <div id="log"></div>
+      </section>
+
+      <section class="box" id="playerBox" hidden>
+        <h2>OUTPUT</h2>
+        <div class="pad player" id="player">
+          <video id="vid" controls playsinline preload="metadata"></video>
+          <div class="links" id="vlinks"></div>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>SCENES</h2>
+        <div class="pad"><div id="scenes"></div><div class="empty" id="noscenes">no scenes yet</div></div>
+      </section>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const h = (tag, props = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "text") e.textContent = v;
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
+  return e;
+};
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-SV": "1", ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const pad2 = n => String(n).padStart(2, "0");
+const fmt = s => `${Math.floor(Math.round(s) / 60)}:${pad2(Math.round(s) % 60)}`;
+let toastT;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toastT); toastT = setTimeout(() => (t.style.display = "none"), 4500);
+}
+
+let ST = null, cur = null, es = null, state = null, busy = false, stages = {}, starts = [], rt = null;
+
+/* ───── status / form ───── */
+function chip(text, cls) { return h("span", { class: "chip " + cls, text }); }
+function renderStatus() {
+  const c = $("#chips"); c.replaceChildren(
+    chip(`NIM ${ST.keys.nvidia ? "✔" : "✖ key"}`, ST.keys.nvidia ? "ok" : "bad"),
+    chip(`GEMINI ${ST.keys.gemini ? "✔" : "✖ key"}`, ST.keys.gemini ? "ok" : "bad"),
+    chip(`FFMPEG ${ST.ffmpeg ? "✔" : "✖"}`, ST.ffmpeg ? "ok" : "bad"),
+    chip(`TTS ${ST.tts.default || "none"}`, ST.tts.default ? "ok" : "bad"),
+  );
+}
+function effTts() { const v = $("#f_tts").value; return v === "auto" ? ST.tts.default : v; }
+function syncForm() {
+  const t = effTts();
+  $("#cbox").hidden = t !== "chatterbox";
+  $("#f_voice").placeholder = { kokoro: "af_heart", piper: "/path/voice.onnx", espeak: "en-us", chatterbox: "(uses reference voice)" }[t] || "";
+}
+function fillForm() {
+  const sel = $("#f_tts");
+  for (const b of ST.tts.list) sel.append(h("option", { value: b.name, disabled: !b.ok && b.name !== "auto", text: b.name + (b.ok ? "" : " (not installed)") }));
+  for (const v of ST.kokoro_voices) $("#voices").append(h("option", { value: v }));
+  sel.onchange = syncForm; syncForm();
+  $("#f_speed").oninput = e => ($("#v_speed").textContent = (+e.target.value).toFixed(2));
+  $("#f_exag").oninput = e => ($("#v_exag").textContent = (+e.target.value).toFixed(2));
+}
+function formBody() {
+  return {
+    prompt: $("#f_prompt").value, scenes: +$("#f_scenes").value, aspect: $("#f_aspect").value,
+    narration: $("#f_narration").value, lang: $("#f_lang").value, tts: $("#f_tts").value,
+    voice: $("#f_voice").value.trim() || null, tts_lang: $("#f_ttslang").value,
+    speed: +$("#f_speed").value, exaggeration: +$("#f_exag").value, ref_audio: $("#f_ref").value.trim() || null,
+    hd: $("#f_hd").checked, kenburns: $("#f_kb").checked, burn_subs: $("#f_subs").checked,
+  };
+}
+async function submitNew(e) {
+  e.preventDefault();
+  const b = $("#btnRun"); b.disabled = true;
+  try { const r = await api("/api/projects", "POST", formBody()); location.hash = "#/p/" + r.id; loadProjects(); }
+  catch (err) { toast(err.message); }
+  b.disabled = false;
+}
+async function testVoice() {
+  const b = $("#btnTest"); b.disabled = true; b.textContent = "… synthesizing";
+  try {
+    const r = await fetch("/api/preview", { method: "POST", headers: { "X-SV": "1", "Content-Type": "application/json" }, body: JSON.stringify({ ...formBody(), prompt: "preview" }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    new Audio(URL.createObjectURL(await r.blob())).play();
+  } catch (err) { toast(err.message); }
+  b.disabled = false; b.textContent = "▶ test voice";
+}
+
+/* ───── project list / routing ───── */
+async function loadProjects() {
+  const rows = await api("/api/projects"), box = $("#plist");
+  if (!rows.length) { box.replaceChildren(h("div", { class: "none", text: "no projects yet" })); return; }
+  box.replaceChildren(...rows.map(r => h("a", { class: "it" + (r.id === cur ? " sel" : ""), href: "#/p/" + r.id },
+    (r.video ? "▶ " : "… ") + r.title,
+    h("small", { text: new Date(r.mtime * 1000).toLocaleString() + " · " + (r.prompt || r.id) }))));
+}
+function route() {
+  const m = location.hash.match(/^#\/p\/(.+)$/);
+  if (m) openProject(decodeURIComponent(m[1]));
+  else closeProject();
+}
+function closeProject() {
+  if (es) { es.close(); es = null; }
+  cur = null; state = null;
+  $("#view").hidden = true; $("#welcome").hidden = false; document.body.classList.remove("open");
+  loadProjects();
+}
+async function openProject(id) {
+  if (es) { es.close(); es = null; }
+  cur = id; stages = {}; busy = false; starts = [];
+  $("#log").replaceChildren(); $("#scenes").replaceChildren(); renderStages();
+  $("#welcome").hidden = true; $("#view").hidden = false; document.body.classList.add("open");
+  window.scrollTo(0, 0);
+  try { await refetch(true); } catch (e) { toast(e.message); location.hash = "#/"; return; }
+  es = new EventSource(`/api/projects/${encodeURIComponent(id)}/events`);
+  es.onmessage = e => onEvent(JSON.parse(e.data));
+  loadProjects();
+}
+
+/* ───── events ───── */
+function logln(msg, cls = "info") {
+  const L = $("#log"), t = new Date().toLocaleTimeString([], { hour12: false });
+  L.append(h("div", { class: cls, text: `[${t}] ${msg}` })); L.scrollTop = L.scrollHeight;
+}
+function renderStages() {
+  $("#stages").replaceChildren(...Object.entries(stages).map(([n, s]) => {
+    const pct = Math.min(100, (s.done / s.total) * 100);
+    return h("div", { class: "stage" + (s.done < s.total ? " run" : "") }, h("span", { text: n }),
+      h("div", { class: "bar" }, h("i", { style: `width:${pct}%` })), h("span", { class: "cnt", text: `${s.done}/${s.total}` }));
+  }));
+}
+function onEvent(ev) {
+  switch (ev.type) {
+    case "busy": busy = true; stages = {}; renderStages(); logln("» " + ev.label, "sys"); setBusy(); break;
+    case "stage": stages[ev.name] = { total: ev.total, done: 0 }; renderStages(); break;
+    case "tick": if (stages[ev.name]) { stages[ev.name].done++; renderStages(); } break;
+    case "finish": if (stages[ev.name]) { stages[ev.name].done = stages[ev.name].total; renderStages(); } break;
+    case "log": logln(ev.msg, ev.level); break;
+    case "asset": case "story": case "video": refetch(); break;
+    case "done": busy = false; logln("✔ complete", "ok"); refetch(true); loadProjects(); break;
+    case "error": busy = false; logln("✖ " + ev.message, "err"); refetch(true); loadProjects(); break;
+  }
+}
+function refetch(now) {
+  clearTimeout(rt);
+  return new Promise((res, rej) => {
+    rt = setTimeout(async () => {
+      if (!cur) return res();
+      try { const s = await api(`/api/projects/${encodeURIComponent(cur)}`); if (s.id === cur) applyState(s); res(); }
+      catch (e) { now ? rej(e) : (logln(e.message, "err"), res()); }
+    }, now ? 0 : 250);
+  });
+}
+
+/* ───── state → DOM ───── */
+function setBusy() {
+  $("#busyTag").textContent = busy ? "◉ WORKING" : "";
+  for (const id of ["btnResume", "btnRender", "btnDelete"]) $("#" + id).disabled = busy;
+  document.querySelectorAll(".card .acts button").forEach(b => (b.disabled = busy));
+}
+function setSrc(el, url) { if (url && el.dataset.src !== url) { el.dataset.src = url; el.src = url; } }
+function applyState(s) {
+  state = s; if (s.busy) busy = true;
+  const o = s.opts || {};
+  $("#pTitle").textContent = s.story ? s.story.title : "(writing story…)";
+  $("#pPrompt").textContent = o.prompt || "";
+  const total = s.scenes.reduce((a, x) => a + (x.duration ? x.duration + s.pad : 0), 0);
+  $("#pMeta").textContent = [o.aspect, o.narration, o.tts, `${s.scenes.length} scenes`, total ? fmt(total) : null, s.id].filter(Boolean).join(" · ");
+  document.documentElement.style.setProperty("--ar", o.aspect === "9:16" ? "9/16" : "16/9");
+  $("#player").classList.toggle("portrait", o.aspect === "9:16");
+
+  const ready = s.scenes.length > 0 && s.scenes.every(x => x.image && x.audio);
+  $("#btnResume").hidden = !!s.video || ready;
+  $("#btnRender").hidden = !ready;
+  $("#btnRender").textContent = s.video ? "re-render" : "render";
+  $("#btnRender").classList.toggle("warn", s.dirty || !s.video);
+  $("#btnRender").classList.toggle("pulse", s.dirty);
+
+  $("#playerBox").hidden = !s.video;
+  if (s.video) {
+    const v = $("#vid");
+    if (v.dataset.src !== s.video) {
+      v.replaceChildren(); v.poster = s.scenes[0]?.image || "";
+      if (s.vtt) v.append(h("track", { kind: "captions", srclang: "en", label: "CC", src: s.vtt, default: true }));
+    }
+    setSrc(v, s.video);
+    $("#vlinks").replaceChildren(h("a", { href: s.video, download: s.id + ".mp4", text: "↓ mp4" }),
+      s.srt ? h("a", { href: s.srt, download: s.id + ".srt", text: "↓ srt" }) : null);
+  }
+  renderScenes(s);
+  setBusy();
+}
+function cardEl(i) { return $(`.card[data-i="${i}"]`); }
+function mkCard(i) {
+  const img = h("img", { alt: "", loading: "lazy" }), shot = h("a", { class: "shot", target: "_blank" }, h("span", { class: "ph", text: "░ PENDING ░" }), img);
+  img.onload = () => shot.classList.add("loaded"); img.onerror = () => shot.classList.remove("loaded");
+  const nar = h("textarea", { rows: 4, class: "nar" }), prm = h("textarea", { rows: 3, class: "prm" });
+  const mark = () => card.classList.toggle("edited", nar.value !== nar.dataset.orig || prm.value !== prm.dataset.orig);
+  nar.oninput = prm.oninput = mark;
+  const aud = h("audio", { controls: true, preload: "none" });
+  const dur = h("span", { class: "dur" });
+  const card = h("article", { class: "card", "data-i": i },
+    h("div", { class: "ch" }, h("b", { text: `[${pad2(i + 1)}]` }),
+      h("button", { class: "btn sm", type: "button", text: "▶ play", onclick: () => seek(i) }), dur),
+    shot, nar,
+    h("details", {}, h("summary", { text: "IMAGE PROMPT" }), prm),
+    aud,
+    h("div", { class: "acts" },
+      h("button", { class: "btn sm", type: "button", text: "save", onclick: () => sceneAct(i, []) }),
+      h("button", { class: "btn sm", type: "button", text: "↻ image", onclick: () => sceneAct(i, ["image"]) }),
+      h("button", { class: "btn sm", type: "button", text: "↻ voice", onclick: () => sceneAct(i, ["voice"]) })));
+  card._r = { img, shot, nar, prm, aud, dur, mark };
+  return card;
+}
+function renderScenes(s) {
+  const box = $("#scenes");
+  $("#noscenes").hidden = s.scenes.length > 0;
+  if (box.children.length !== s.scenes.length) box.replaceChildren(...s.scenes.map((_, i) => mkCard(i)));
+  starts = []; let t = 0;
+  s.scenes.forEach((sc, i) => {
+    const r = box.children[i]._r;
+    starts.push(t); if (sc.duration) t += sc.duration + s.pad;
+    for (const [el, val] of [[r.nar, sc.narration], [r.prm, sc.image_prompt]]) {
+      if (el.value === (el.dataset.orig ?? "") || el.value === val) { el.value = val; el.dataset.orig = val; }
+    }
+    r.mark();
+    if (sc.image && r.img.dataset.src !== sc.image) { r.img.dataset.src = sc.image; r.shot.classList.remove("loaded"); r.img.src = sc.image; r.shot.href = sc.image; }
+    if (!sc.image) { r.shot.classList.remove("loaded"); delete r.img.dataset.src; r.img.removeAttribute("src"); }
+    if (sc.audio && r.aud.dataset.src !== sc.audio) { r.aud.dataset.src = sc.audio; r.aud.src = sc.audio; }
+    if (!sc.audio) { delete r.aud.dataset.src; r.aud.removeAttribute("src"); }
+    r.dur.textContent = sc.duration ? sc.duration.toFixed(1) + "s" : "…";
+  });
+}
+function seek(i) {
+  const v = $("#vid");
+  if (!state?.video) return toast("render the video first");
+  v.currentTime = starts[i] || 0; v.play(); $("#playerBox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+$("#vid").addEventListener("timeupdate", () => {
+  const t = $("#vid").currentTime; let n = -1;
+  starts.forEach((s, i) => { if (t >= s) n = i; });
+  document.querySelectorAll(".card").forEach(c => c.classList.toggle("now", +c.dataset.i === n && !$("#vid").paused));
+});
+
+/* ───── actions ───── */
+async function sceneAct(i, regen) {
+  const r = cardEl(i)._r, body = { regen };
+  if (r.nar.value !== r.nar.dataset.orig) body.narration = r.nar.value;
+  if (r.prm.value !== r.prm.dataset.orig) body.image_prompt = r.prm.value;
+  try { const j = await api(`/api/projects/${encodeURIComponent(cur)}/scenes/${i}`, "POST", body); if (!j.started) toast("nothing changed"); }
+  catch (e) { toast(e.message); }
+}
+async function act(path, body) {
+  try { await api(`/api/projects/${encodeURIComponent(cur)}/${path}`, "POST", body); }
+  catch (e) { toast(e.message); }
+}
+$("#btnResume").onclick = () => act("resume");
+$("#btnRender").onclick = () => act("render", { kenburns: state?.opts?.kenburns ?? true, burn_subs: state?.opts?.burn_subs ?? false });
+$("#btnDelete").onclick = async () => {
+  if (!confirm("Delete this project and all its files?")) return;
+  try { await api(`/api/projects/${encodeURIComponent(cur)}`, "DELETE"); location.hash = "#/"; }
+  catch (e) { toast(e.message); }
+};
+$("#back").onclick = () => (location.hash = "#/");
+$("#newForm").addEventListener("submit", submitNew);
+$("#f_prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#newForm").requestSubmit(); });
+$("#btnTest").onclick = testVoice;
+window.addEventListener("hashchange", route);
+
+(async () => {
+  try { ST = await api("/api/status"); } catch (e) { toast("server unreachable"); return; }
+  renderStatus(); fillForm(); await loadProjects(); route();
+})();
+</script>
+</body>
+</html>
